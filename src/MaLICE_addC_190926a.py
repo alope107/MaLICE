@@ -21,7 +21,7 @@ starttime = time.time()
 
 ## Currently going to be lazy and just have VERL and FITZAP data pre-loaded
 ## but eventually want to have the code be brought in
-cwd = '~/Google Drive/Swanson Lab/NMR Files/smoothplotter/2019-07/MaLICE/'
+cwd = '../data/'
 verl = pd.read_csv(cwd+'verl_190726.csv')
 
 fitzap = pd.read_csv(cwd+'fitzap_190821.csv')
@@ -29,13 +29,13 @@ fitzap = fitzap.copy()[[x[-3:] == 'N-H' for x in fitzap.residue]]
 fitzap['residue'] = [int(x[1:-3]) for x in fitzap.residue]
 
 #mleinput = verl.copy()  # Start with VERL data
-#mleinput = fitzap.copy()
-
+mleinput = fitzap.copy()
+'''
 mleinput = pd.read_csv('abd2_fMaLICE_190924.csv')
 mleinput = mleinput[mleinput.residue.between(289,356,inclusive=True)]
 mleinput = mleinput[mleinput.intensity > 0.3]
 mleinput = mleinput[mleinput.tit < 500]
-
+'''
 residues = list(mleinput.groupby('residue').groups.keys())
 resgrouped = mleinput.loc[mleinput.tit == 0,['residue','15N','1H','intensity']]
 i_noise_est = np.mean(mleinput.intensity)/10
