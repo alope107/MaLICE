@@ -13,6 +13,7 @@ import scipy.stats as stats
 from scipy.optimize import minimize,basinhopping,differential_evolution
 from matplotlib import pyplot as plt
 import matplotlib.cm as cm
+from matplotlib.backends.backend_pdf import PdfPages
 
 starttime = time.time()
 
