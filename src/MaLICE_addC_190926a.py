@@ -14,7 +14,7 @@ from scipy.optimize import minimize,basinhopping,differential_evolution
 from matplotlib import pyplot as plt
 import matplotlib.cm as cm
 from matplotlib.backends.backend_pdf import PdfPages
-
+import argparse
 
 ## Stage 1 - initial global and delta_w optimization
 ## Equation 1
@@ -269,42 +269,27 @@ def model_fitter(df, model3b):
     return df
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('input_file', type=str, help='path to the CSV to import')
+    args = parser.parse_args()
+    run_malice(args.input_file)
+
+def run_malice(fname):
     global i
     starttime = time.time()
-
-    ## Read in data
-    #mleinput = pd.read_csv(sys.argv[1])
-
-    ## Currently going to be lazy and just have VERL and FITZAP data pre-loaded
-    ## but eventually want to have the code be brought in
-    cwd = '../data/'
-    verl = pd.read_csv(cwd+'verl_190726.csv')
-
-    fitzap = pd.read_csv(cwd+'fitzap_190821.csv')
-    fitzap = fitzap.copy()[[x[-3:] == 'N-H' for x in fitzap.residue]]
-    fitzap['residue'] = [int(x[1:-3]) for x in fitzap.residue]
-
-    #mleinput = verl.copy()  # Start with VERL data
-    mleinput = fitzap.copy()
-    '''
-    mleinput = pd.read_csv('abd2_fMaLICE_190924.csv')
-    mleinput = mleinput[mleinput.residue.between(289,356,inclusive=True)]
-    mleinput = mleinput[mleinput.intensity > 0.3]
-    mleinput = mleinput[mleinput.tit < 500]
-    '''
+    
+    input = pd.read_csv(fname)
+    mleinput = input.copy()
+    
     residues = list(mleinput.groupby('residue').groups.keys())
     resgrouped = mleinput.loc[mleinput.tit == 0,['residue','15N','1H','intensity']]
     i_noise_est = np.mean(mleinput.intensity)/10
-    
-    # Temporary hack to curry mle_lambda
-    #mle_lambda = mle_lambda_factory(resgrouped)
 
     ## Important variables
     larmor = 500
     nh_scale = 0.2
     gvs = 6
     lam = 0.01
-    resgrouped = resgrouped
     
     mle_lam_settings = {
         "larmor" : larmor,
