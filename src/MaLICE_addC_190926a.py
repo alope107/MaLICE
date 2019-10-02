@@ -317,7 +317,7 @@ def main():
     
     threads = 10
 
-    pop_iter = 1#10
+    pop_iter = 10
     
     ## Perform 10 replicates of 20 member populations
     print('\n---  Round 1: initial global variable and delta w optimization  ---\n')
@@ -350,7 +350,7 @@ def main():
         print('Round 1 - Population # '+str(iteration+1))
         i = 0
         initfit = differential_evolution(mle_lambda, bds1, args=(mle_lam_settings,), init = pop, updating='deferred', 
-                                         workers = threads, mutation=(0.5,1.9),maxiter = 10,#100000, 
+                                         workers = threads, mutation=(0.5,1.9),maxiter = 100000, 
                                          strategy = 'best1bin', polish = False, recombination = 0.7, 
                                          tol=1e-6, disp=False, callback=counter_1_factory(mle_lam_settings))
         print('\n'+str(round(initfit.fun - lam*np.sum(initfit.x[gvs:]),2))+'\n')
@@ -390,7 +390,7 @@ def main():
         print('Round 2 - Population #'+str(z+1))
         i = 0
         ref_opt = differential_evolution(refpeak_opt, bds2, args=(refpeak_settings,), init = pop, updating='deferred', 
-                                         workers = threads, mutation=(0.5,1.9), maxiter = 10, #100000, 
+                                         workers = threads, mutation=(0.5,1.9), maxiter = 100000, 
                                          strategy = 'best1bin', polish = False, recombination = 0.7,
                                          tol=1e-7, disp=False, callback=counter_2_factory(refpeak_settings))
         print('\n'+str(round(ref_opt.fun,2))+'\n')
@@ -402,7 +402,7 @@ def main():
 
     ## Polish the reference peaks
     model2opt = minimize(refpeak_opt, model2.x, args=(refpeak_settings,), method='SLSQP',bounds=bds2,
-                         tol=1e-7, options={'disp':True,'maxiter': 1})#10000})
+                         tol=1e-7, options={'disp':True,'maxiter': 10000})
 
     ## Stage 3 - polish off the model with gradient minimization
     print('\n---  Round 3: gradient minimization of global variables and delta w  ---\n')
@@ -427,7 +427,7 @@ def main():
     mle_reduced_settings["model2opt"] = model2opt
 
     model3a = minimize(mle_reduced, init3a, args=(mle_reduced_settings,), method='SLSQP',bounds=bds3a,
-                       tol=1e-7,options={'disp':True,'maxiter':10})#10000})
+                       tol=1e-7,options={'disp':True,'maxiter':10000})
 
 
     ## Run the 3b fine tuning optimization
@@ -450,7 +450,7 @@ def main():
 
     # Full minimization
     model3b = minimize(mle_full, init3b, args=(mle_full_settings,), method='SLSQP', bounds=bds3b,
-                      tol=1e-7, options={'disp':True,'maxiter':1})#10000})
+                      tol=1e-7, options={'disp':True,'maxiter':10000})
 
     print('\nFinal Score = '+str(round(model3b.fun,2)))
 
