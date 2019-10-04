@@ -327,7 +327,7 @@ def run_malice(fname):
     
     threads = 10
 
-    pop_iter = 1
+    pop_iter = 10
     
     ## Perform 10 replicates of 20 member populations
     print('\n---  Round 1: initial global variable and delta w optimization  ---\n')
@@ -335,7 +335,7 @@ def run_malice(fname):
     for iteration in range(pop_iter):
         ## Let's define a new starting population every time to try to introduce more coverage of the space
         pop = []
-        pop_size = 10  #small starting pop
+        pop_size = 20  #small starting pop
         for x in range(pop_size):
             Kd_exp_random = list(np.random.random(1)*7-3)   # Will span from 1 nM to 10 mM
             kex_exp_random = list(np.random.random(1)*2+3)  # Will span from 1 kHz to 100 kHz
@@ -381,7 +381,7 @@ def run_malice(fname):
     models2 = []
     for z in range(pop_iter):
         pop = []
-        pop_size = 10  #small starting pop 
+        pop_size = 20  #small starting pop 
         for x in range(pop_size):
             N_random = list( np.array(resgrouped['15N']) + np.random.normal(0,model1.x[4]/nh_scale,len(residues)) )
             H_random = list( np.array(resgrouped['1H']) + np.random.normal(0,model1.x[4],len(residues)) )  
