@@ -468,7 +468,10 @@ def run_malice(fname):
     ## Let's go ahead and print some results + save a figure
     print('\n\tKd = '+str(round(np.power(10,model3b.x[0]),2))+
           '\n\tkoff = '+str(round(np.power(10,model3b.x[1]),2))+
-          '\n\tC = '+str(round(model3b.x[2],2)))
+          '\n\tC = '+str(round(model3b.x[2],2))+
+          '\n\tInoise = '+str(round(model3b.x[3],2))+
+          '\n\tCSnoise = '+str(round(model3b.x[4],2))+
+          '\n\tAmp = '+str(round(model3b.x[5],2)))
 
     dfs = pd.DataFrame({'residue':residues,'dw':model3b.x[gvs:]})
 
@@ -537,6 +540,8 @@ def run_malice(fname):
     dfs['p-value'] = (1-stats.chi2.cdf(2*dfs.deltaLL,df=1))*len(dfs)/dfs['rank']
     dfs = dfs.sort_values('deltaLL',ascending=False)
     dfs['sig'] = dfs['p-value'] < 0.01
+    dfs.to_csv(fname+'_MaLICE_fits.csv',index=False)
+    dfs[['residue','dw']].to_csv(fname+'_MaLICE_deltaw.txt',index=False,header=False)
 
     endtime = time.time()
     runtime = endtime-starttime
