@@ -303,6 +303,8 @@ def run_malice(fname):
     global i
     starttime = time.time()
     
+    fname_prefix = fname.split('/')[-1].split('.')[0]
+    
     input = pd.read_csv(fname)
     mleinput = input.copy()
     
@@ -511,17 +513,21 @@ def run_malice(fname):
 
     xl = [np.min(concs.tit)-0.05*tit_rng, np.max(concs.tit)+0.05*tit_rng]
     csp_rng = np.max(mleoutput.csp)-np.min(mleoutput.csp)
-    yl = [np.min(mleoutput.csp)-0.05*csp_rng, np.max(mleoutput.csp)+0.05*csp_rng]
+    yl_csp = [np.min(mleoutput.csp)-0.05*csp_rng, np.max(mleoutput.csp)+0.05*csp_rng]
+    int_rng = np.max(mleoutput.intensity)-np.min(mleoutput.intensity)
+    yl_int = [np.min(mleoutput.intensity)-0.05*int_rng, np.max(mleoutput.intensity)+0.05*int_rng]
 
-    with PdfPages(fname+'_MaLICE_fits.pdf') as pdf:
+    with PdfPages(fname_prefix+'_MaLICE_fits.pdf') as pdf:
         for residue in residues:
             fig, ax = plt.subplots(ncols=2,figsize=(7.5,2.5))
-            ax[0].scatter('tit','csp',data=mleoutput[mleoutput.residue == residue])
+            ax[0].scatter('tit','csp',data=mleoutput[mleoutput.residue == residue],color='black')
+            ax[0].errorbar('tit','csp',data=mleoutput[mleoutput.residue == residue],yerr=model3b.x[4],color='black',fmt='none')
             ax[0].plot('tit','cshat',data=fit_data[fit_data.residue == residue])
             ax[1].scatter('tit','intensity',data=mleoutput[mleoutput.residue == residue])
+            ax[0].errorbar('tit','intensity',data=mleoutput[mleoutput.residue == residue],yerr=model3b.x[3],color='black',fmt='none')
             ax[1].plot('tit','ihat',data=fit_data[fit_data.residue == residue])
-            ax[0].set(xlim=xl, ylim=yl, xlabel='Titrant (μM)', ylabel='CSP (Hz)', title='Residue '+str(residue)+' CSP')
-            ax[1].set(xlim=xl, ylim=yl, xlabel='Titrant (μM)', ylabel='Intensity', title='Residue '+str(residue)+' Intensity')
+            ax[0].set(xlim=xl, ylim=yl_csp, xlabel='Titrant (μM)', ylabel='CSP (Hz)', title='Residue '+str(residue)+' CSP')
+            ax[1].set(xlim=xl, ylim=yl_int, xlabel='Titrant (μM)', ylabel='Intensity', title='Residue '+str(residue)+' Intensity')
             fig.tight_layout()
             pdf.savefig()
             plt.close()
@@ -540,8 +546,8 @@ def run_malice(fname):
     dfs['p-value'] = (1-stats.chi2.cdf(2*dfs.deltaLL,df=1))*len(dfs)/dfs['rank']
     dfs = dfs.sort_values('deltaLL',ascending=False)
     dfs['sig'] = dfs['p-value'] < 0.01
-    dfs.to_csv(fname+'_MaLICE_fits.csv',index=False)
-    dfs[['residue','dw']].to_csv(fname+'_MaLICE_deltaw.txt',index=False,header=False)
+    dfs.to_csv(fname_prefix+'_MaLICE_fits.csv',index=False)
+    dfs[['residue','dw']].to_csv(fname_prefix+'_MaLICE_deltaw.txt',index=False,header=False)
 
     endtime = time.time()
     runtime = endtime-starttime
