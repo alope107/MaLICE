@@ -8,6 +8,7 @@
 
 ## Import libraries
 import sys, itertools, time, datetime, concurrent, multiprocessing
+import os
 import numpy as np, pandas as pd
 import scipy.stats as stats
 from scipy.optimize import minimize,basinhopping,differential_evolution
@@ -42,6 +43,10 @@ def _parse_args():
                         type=int,
                         help='Number of threads to spawn',
                         default=3)
+    parser.add_argument('--output_dir',
+                        type=str,
+                        help='Directory to store ouput files. Creates if non-existent.',
+                        default="output")
     # TODO: validate arguments
     return parser.parse_args()
 
@@ -348,7 +353,12 @@ def bootstrapper(fx, config, stngs, model, gvs, bds):
 
 def main():
     args = _parse_args()
+    make_ouput_dir(args.output_dir)
     run_malice(args)
+    
+def make_ouput_dir(directory):
+    if not os.path.exists(directory):
+        os.makedirs(directory)
 
 def run_malice(config):
     global i
@@ -565,7 +575,8 @@ def run_malice(config):
     int_rng = np.max(mleoutput.intensity)-np.min(mleoutput.intensity)
     yl_int = [np.min(mleoutput.intensity)-0.05*int_rng, np.max(mleoutput.intensity)+0.05*int_rng]
 
-    with PdfPages(fname_prefix+'_MaLICE_fits.pdf') as pdf:
+    pdf_name = os.path.join(config.output_dir, fname_prefix + '_MaLICE_fits.pdf')
+    with PdfPages(pdf_name) as pdf:
         for residue in residues:
             fig, ax = plt.subplots(ncols=2,figsize=(7.5,2.5))
             ax[0].scatter('tit','csp',data=mleoutput[mleoutput.residue == residue],color='black',s=2)
@@ -611,17 +622,20 @@ def run_malice(config):
     dfs['stderr'] = [np.std([x.result().x[gvs+r] for x in futures]) for r in range(len(residues))]
     
     
+    png_name = os.path.join(config.output_dir, fname_prefix + '_MaLICE_plot.png')
     fig, ax = plt.subplots(figsize=(12,8))
     ax.scatter('residue','dw',data=dfs[dfs.sig == False],color='black')
     ax.errorbar('residue','dw',yerr='stderr',data=dfs[dfs.sig == False],color='black',fmt='none')
     ax.scatter('residue','dw',data=dfs[dfs.sig == True],color='red')
     ax.errorbar('residue','dw',yerr='stderr',data=dfs[dfs.sig == True],color='red',fmt='none')
     ax.set(xlim=xl)
-    fig.savefig(fname_prefix+'_MaLICE_plot.png',dpi=600,bbox_inches='tight',pad_inches=0)
+    fig.savefig(png_name,dpi=600,bbox_inches='tight',pad_inches=0)
 
     ## Print out data
-    dfs.to_csv(fname_prefix+'_MaLICE_fits.csv',index=False)
-    dfs[['residue','dw']].to_csv(fname_prefix+'_MaLICE_deltaw.txt',index=False,header=False)
+    csv_name = os.path.join(config.output_dir, fname_prefix + '_MaLICE_fits.csv')
+    txt_name = os.path.join(config.output_dir, fname_prefix+'_MaLICE_deltaw.txt')
+    dfs.to_csv(csv_name,index=False)
+    dfs[['residue','dw']].to_csv(txt_name, index=False,header=False)
 
     endtime = time.time()
     runtime = endtime-starttime
