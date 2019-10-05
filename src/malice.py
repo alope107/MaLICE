@@ -47,6 +47,9 @@ def _parse_args():
                         type=str,
                         help='Directory to store ouput files. Creates if non-existent.',
                         default="output")
+    parser.add_argument('--deterministic',
+                        action='store_true',
+                        help='Whether to use a deterministic seed.')
     # TODO: validate arguments
     return parser.parse_args()
 
@@ -354,6 +357,8 @@ def bootstrapper(fx, config, stngs, model, gvs, bds):
 def main():
     args = _parse_args()
     make_ouput_dir(args.output_dir)
+    if args.deterministic:
+        np.random.seed(seed=1337)
     run_malice(args)
     
 def make_ouput_dir(directory):
