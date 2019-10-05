@@ -15,6 +15,35 @@ from matplotlib import pyplot as plt
 import matplotlib.cm as cm
 from matplotlib.backends.backend_pdf import PdfPages
 import argparse
+import concurrent.futures
+
+def _parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('input_file', 
+                        type=str, 
+                        help='path to the CSV to import')
+    parser.add_argument("--pop_iter", 
+                        type=int,
+                        help='Number of populations to perform the differential evolution on',
+                        default=10)
+    parser.add_argument('--pop_size', 
+                        type=int,
+                        help='Number of populations to perform differential evolution on',
+                        default=20)
+    parser.add_argument('--evo_max_iter',  #TODO: Different maxes for different phases?
+                        type=int,
+                        help='Maximum number of iterations to run differential evolution for each population',
+                        default=100000)
+    parser.add_argument('--least_squares_max_iter', #TODO: Different maxes for different phases?
+                        type=int,
+                        help='Maximum number of iterations to run sequential least squares minimization',
+                        default=10000)
+    parser.add_argument('--thread_count',
+                        type=int,
+                        help='Number of threads to spawn',
+                        default=3)
+    # TODO: validate arguments
+    return parser.parse_args()
 
 ## Stage 1 - initial global and delta_w optimization
 ## Equation 1
@@ -268,7 +297,7 @@ def model_fitter(df, model3b):
     
     return df
 
-def null_calculator(fx, stngs, model, df, gvs, bds, res):
+def null_calculator(fx, config, stngs, model, df, gvs, bds, res):
     dfx = df.copy()
     dfx.loc[dfx.residue == res,'dw'] = 0
     
@@ -287,13 +316,13 @@ def null_calculator(fx, stngs, model, df, gvs, bds, res):
     
     # Minimize
     nullLL = minimize(fx, initx, args=(stngs,), method='SLSQP', bounds=bdsx,
-                      tol=1e-7, options={'disp':True,'maxiter':10000})
+                      tol=1e-7, options={'disp':True,'maxiter':config.least_squares_max_iter})
 
     print('null LogL calculated for residue '+str(res))
     
     return nullLL.fun
 
-def bootstrapper(fx, stngs, model, gvs, bds):
+def bootstrapper(fx, config, stngs, model, gvs, bds):
     
     bs_settings = stngs.copy()
     bs_settings['mleinput'] = stngs['mleinput'].sample(frac=1,replace=True)
@@ -313,20 +342,19 @@ def bootstrapper(fx, stngs, model, gvs, bds):
     
     ## Run the minimizer
     bootstrap = minimize(fx, initx, args=(bs_settings,), method='SLSQP', bounds=bdsx,
-                         tol=1e-7, options={'disp':False,'maxiter':10000})
+                         tol=1e-7, options={'disp':False,'maxiter':config.least_squares_max_iter})
     
     return bootstrap
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('input_file', type=str, help='path to the CSV to import')
-    args = parser.parse_args()
-    run_malice(args.input_file)
+    args = _parse_args()
+    run_malice(args)
 
-def run_malice(fname):
+def run_malice(config):
     global i
     starttime = time.time()
     
+    fname = config.input_file
     fname_prefix = fname.split('/')[-1].split('.')[0]
     
     input = pd.read_csv(fname)
@@ -354,19 +382,16 @@ def run_malice(fname):
         "resgrouped": resgrouped,
         "mleinput" : mleinput,
     }
-    
-    threads = 3
 
-    pop_iter = 10
     
-    ## Perform 10 replicates of 20 member populations
+    
+    ## Perform pop_iter replicates of pop_size member populations
     print('\n---  Round 1: initial global variable and delta w optimization  ---\n')
     models1 = []
-    for iteration in range(pop_iter):
+    for iteration in range(config.pop_iter):
         ## Let's define a new starting population every time to try to introduce more coverage of the space
         pop = []
-        pop_size = 20  #small starting pop
-        for x in range(pop_size):
+        for x in range(config.pop_size):
             Kd_exp_random = list(np.random.random(1)*7-3)   # Will span from 1 nM to 10 mM
             kex_exp_random = list(np.random.random(1)*2+3)  # Will span from 1 kHz to 100 kHz
             C_random = list(np.random.random(1)*200)            # 0 - 200 Hz
@@ -390,7 +415,7 @@ def run_malice(fname):
         print('Round 1 - Population # '+str(iteration+1))
         i = 0
         initfit = differential_evolution(mle_lambda, bds1, args=(mle_lam_settings,), init = pop, updating='deferred', 
-                                         workers = threads, mutation=(0.5,1.9),maxiter = 100000, 
+                                         workers = config.thread_count, mutation=(0.5,1.9),maxiter = config.evo_max_iter, 
                                          strategy = 'best1bin', polish = False, recombination = 0.7, 
                                          tol=1e-6, disp=False, callback=counter_1_factory(mle_lam_settings))
         print('\n'+str(round(initfit.fun - lam*np.sum(initfit.x[gvs:]),2))+'\n')
@@ -409,10 +434,9 @@ def run_malice(fname):
     
     ## Set up replicate populations and run
     models2 = []
-    for z in range(pop_iter):
+    for z in range(config.pop_iter):
         pop = []
-        pop_size = 20  #small starting pop 
-        for x in range(pop_size):
+        for x in range(config.pop_size):
             N_random = list( np.array(resgrouped['15N']) + np.random.normal(0,model1.x[4]/nh_scale,len(residues)) )
             H_random = list( np.array(resgrouped['1H']) + np.random.normal(0,model1.x[4],len(residues)) )  
             Iref_random = list( np.array(resgrouped['intensity']) + np.random.normal(0,model1.x[3],len(residues)) )
@@ -430,7 +454,7 @@ def run_malice(fname):
         print('Round 2 - Population #'+str(z+1))
         i = 0
         ref_opt = differential_evolution(refpeak_opt, bds2, args=(refpeak_settings,), init = pop, updating='deferred', 
-                                         workers = threads, mutation=(0.5,1.9), maxiter = 100000, 
+                                         workers = config.thread_count, mutation=(0.5,1.9), maxiter = config.evo_max_iter, 
                                          strategy = 'best1bin', polish = False, recombination = 0.7,
                                          tol=1e-7, disp=False, callback=counter_2_factory(refpeak_settings))
         print('\n'+str(round(ref_opt.fun,2))+'\n')
@@ -442,7 +466,7 @@ def run_malice(fname):
 
     ## Polish the reference peaks
     model2opt = minimize(refpeak_opt, model2.x, args=(refpeak_settings,), method='SLSQP',bounds=bds2,
-                         tol=1e-7, options={'disp':True,'maxiter': 10000})
+                         tol=1e-7, options={'disp':True,'maxiter': config.least_squares_max_iter})
 
     ## Stage 3 - polish off the model with gradient minimization
     print('\n---  Round 3: gradient minimization of global variables and delta w  ---\n')
@@ -467,7 +491,7 @@ def run_malice(fname):
     mle_reduced_settings["model2opt"] = model2opt
 
     model3a = minimize(mle_reduced, init3a, args=(mle_reduced_settings,), method='SLSQP',bounds=bds3a,
-                       tol=1e-7,options={'disp':True,'maxiter':10000})
+                       tol=1e-7,options={'disp':True,'maxiter':config.least_squares_max_iter})
 
 
     ## Run the 3b fine tuning optimization
@@ -490,7 +514,7 @@ def run_malice(fname):
 
     # Full minimization
     model3b = minimize(mle_full, init3b, args=(mle_full_settings,), method='SLSQP', bounds=bds3b,
-                      tol=1e-7, options={'disp':True,'maxiter':10000})
+                      tol=1e-7, options={'disp':True,'maxiter':config.least_squares_max_iter})
 
     print('\nFinal Score = '+str(round(model3b.fun,2)))
 
@@ -559,8 +583,8 @@ def run_malice(fname):
 
     ## Perform likelihood ratio tests
     print('\n---  Round 4: likelihood ratio test of parameters  ---\n')
-    executor = concurrent.futures.ProcessPoolExecutor(threads)
-    futures = [executor.submit(null_calculator, mle_full, mle_full_settings, model3b.x, dfs, gvs, bds1, r) for r in residues]
+    executor = concurrent.futures.ProcessPoolExecutor(config.thread_count)
+    futures = [executor.submit(null_calculator, mle_full, config, mle_full_settings, model3b.x, dfs, gvs, bds1, r) for r in residues]
     concurrent.futures.wait(futures)
 
     dfs['altLL'] = -1 * model3b.fun
@@ -575,8 +599,8 @@ def run_malice(fname):
     ## Compute errors by bootstrapping
     print('\n---  Round 5: bootstrapping to estimate parameter varaince  ---\n')
 
-    executor = concurrent.futures.ProcessPoolExecutor(threads)
-    futures = [executor.submit(bootstrapper, mle_full, mle_full_settings, model3b.x, gvs, bds1) for i in range(bootstraps)]
+    executor = concurrent.futures.ProcessPoolExecutor(config.thread_count)
+    futures = [executor.submit(bootstrapper, mle_full, config, mle_full_settings, model3b.x, gvs, bds1) for i in range(bootstraps)]
     concurrent.futures.wait(futures)
     
     global_params = ['kd_exp','koff_exp','C','I_noise','CS_noise','amp']
@@ -589,9 +613,9 @@ def run_malice(fname):
     
     fig, ax = plt.subplots(figsize=(12,8))
     ax.scatter('residue','dw',data=dfs[dfs.sig == False],color='black')
-    ax.errobar('residue','dw',yerr='stderr',data=dfs[dfs.sig == False],color='black',fmt='none')
+    ax.errorbar('residue','dw',yerr='stderr',data=dfs[dfs.sig == False],color='black',fmt='none')
     ax.scatter('residue','dw',data=dfs[dfs.sig == True],color='red')
-    ax.errobar('residue','dw',yerr='stderr',data=dfs[dfs.sig == True],color='red',fmt='none')
+    ax.errorbar('residue','dw',yerr='stderr',data=dfs[dfs.sig == True],color='red',fmt='none')
     ax.set(xlim=xl)
     fig.savefig(fname_prefix+'_MaLICE_plot.png',dpi=600,bbox_inches='tight',pad_inches=0)
 
