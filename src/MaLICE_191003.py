@@ -273,13 +273,13 @@ def null_calculator(fx, stngs, model, df, gvs, bds, res):
     dfx.loc[dfx.residue == res,'dw'] = 0
     
     mininit = [model[0]-0.2, model[1]-0.2, model[2]-10, model[3]/1.2,
-               model[4]/1.2, model[5]/1.2] + list(model[gvs:]/2)
+               model[4]/1.2, model[5]/1.2] + list(dfx.dw/2)
     maxinit = [model[0]+0.2, model[1]+0.2, model[2]+10, model[3]*1.2,
-               model[4]*1.2, model[5]*1.2] + list(model[gvs:]*2)
+               model[4]*1.2, model[5]*1.2] + list(dfx.dw*2)
     
     for i in range(gvs):
-        if mininit[i] < bds[i][0]:	mininit[i] = bds1[i][0]
-        if maxinit[i] > bds[i][1]:	maxinit[i] = bds1[i][1]
+        if mininit[i] < bds[i][0]:	mininit[i] = bds[i][0]
+        if maxinit[i] > bds[i][1]:	maxinit[i] = bds[i][1]
     
     bdsx = tuple([(mininit[x],maxinit[x]) for x in range(len(mininit))])
     
@@ -292,6 +292,30 @@ def null_calculator(fx, stngs, model, df, gvs, bds, res):
     print('null LogL calculated for residue '+str(res))
     
     return nullLL.fun
+
+def bootstrapper(fx, stngs, model, gvs, bds):
+    
+    bs_settings = stngs.copy()
+    bs_settings['mleinput'] = stngs['mleinput'].sample(frac=1,replace=True)
+    
+    mininit = [model[0]-0.2, model[1]-0.2, model[2]-10, model[3]/1.2,
+               model[4]/1.2, model[5]/1.2] + list(model[gvs:]/2)
+    maxinit = [model[0]+0.2, model[1]+0.2, model[2]+10, model[3]*1.2,
+               model[4]*1.2, model[5]*1.2] + list(model[gvs:]*2)
+    
+    for i in range(gvs):
+        if mininit[i] < bds[i][0]:	mininit[i] = bds[i][0]
+        if maxinit[i] > bds[i][1]:	maxinit[i] = bds[i][1]
+    
+    bdsx = tuple([(mininit[x],maxinit[x]) for x in range(len(mininit))])
+    
+    initx = list(model)
+    
+    ## Run the minimizer
+    bootstrap = minimize(fx, initx, args=(bs_settings,), method='SLSQP', bounds=bdsx,
+                         tol=1e-7, options={'disp':False,'maxiter':10000})
+    
+    return bootstrap
 
 def main():
     parser = argparse.ArgumentParser()
@@ -309,7 +333,10 @@ def run_malice(fname):
     mleinput = input.copy()
     
     residues = list(mleinput.groupby('residue').groups.keys())
-    resgrouped = mleinput.loc[mleinput.tit == 0,['residue','15N','1H','intensity']]
+    resgrouped = pd.DataFrame()
+    for res in residues:
+        resdata = mleinput.copy()[mleinput.residue == res]
+        resgrouped = resgrouped.append(resdata.loc[resdata.intensity == np.max(resdata.intensity),['residue','15N','1H','intensity']])
     i_noise_est = np.mean(mleinput.intensity)/10
 
     ## Important variables
@@ -317,6 +344,7 @@ def run_malice(fname):
     nh_scale = 0.2
     gvs = 6
     lam = 0.01
+    bootstraps = 100
     
     mle_lam_settings = {
         "larmor" : larmor,
@@ -327,7 +355,7 @@ def run_malice(fname):
         "mleinput" : mleinput,
     }
     
-    threads = 10
+    threads = 3
 
     pop_iter = 10
     
@@ -477,10 +505,6 @@ def run_malice(fname):
 
     dfs = pd.DataFrame({'residue':residues,'dw':model3b.x[gvs:]})
 
-    fig, ax = plt.subplots(figsize=(6,4))
-    ax.scatter(residues,model3b.x[gvs:])
-    #fig.savefig('verl190923.png',dpi=600,bbox_inches='tight',pad_inches=0)
-
     ## Output the per-residue fits
     concs = mleinput[['tit','obs']].drop_duplicates()
     tit_obs_lm = stats.linregress(concs.tit,concs.obs)
@@ -511,7 +535,7 @@ def run_malice(fname):
                             np.square(mleoutput['1H'] - mleoutput['1H_ref']) ))
 
 
-    xl = [np.min(concs.tit)-0.05*tit_rng, np.max(concs.tit)+0.05*tit_rng]
+    xl = [np.min(concs.tit)-0.01*tit_rng, np.max(concs.tit)+0.01*tit_rng]
     csp_rng = np.max(mleoutput.csp)-np.min(mleoutput.csp)
     yl_csp = [np.min(mleoutput.csp)-0.05*csp_rng, np.max(mleoutput.csp)+0.05*csp_rng]
     int_rng = np.max(mleoutput.intensity)-np.min(mleoutput.intensity)
@@ -520,11 +544,11 @@ def run_malice(fname):
     with PdfPages(fname_prefix+'_MaLICE_fits.pdf') as pdf:
         for residue in residues:
             fig, ax = plt.subplots(ncols=2,figsize=(7.5,2.5))
-            ax[0].scatter('tit','csp',data=mleoutput[mleoutput.residue == residue],color='black')
+            ax[0].scatter('tit','csp',data=mleoutput[mleoutput.residue == residue],color='black',s=2)
             ax[0].errorbar('tit','csp',data=mleoutput[mleoutput.residue == residue],yerr=model3b.x[4],color='black',fmt='none')
             ax[0].plot('tit','cshat',data=fit_data[fit_data.residue == residue])
-            ax[1].scatter('tit','intensity',data=mleoutput[mleoutput.residue == residue])
-            ax[0].errorbar('tit','intensity',data=mleoutput[mleoutput.residue == residue],yerr=model3b.x[3],color='black',fmt='none')
+            ax[1].scatter('tit','intensity',data=mleoutput[mleoutput.residue == residue],color='black',s=2)
+            ax[1].errorbar('tit','intensity',data=mleoutput[mleoutput.residue == residue],yerr=model3b.x[3],color='black',fmt='none')
             ax[1].plot('tit','ihat',data=fit_data[fit_data.residue == residue])
             ax[0].set(xlim=xl, ylim=yl_csp, xlabel='Titrant (μM)', ylabel='CSP (Hz)', title='Residue '+str(residue)+' CSP')
             ax[1].set(xlim=xl, ylim=yl_int, xlabel='Titrant (μM)', ylabel='Intensity', title='Residue '+str(residue)+' Intensity')
@@ -546,6 +570,32 @@ def run_malice(fname):
     dfs['p-value'] = (1-stats.chi2.cdf(2*dfs.deltaLL,df=1))*len(dfs)/dfs['rank']
     dfs = dfs.sort_values('deltaLL',ascending=False)
     dfs['sig'] = dfs['p-value'] < 0.01
+
+
+    ## Compute errors by bootstrapping
+    print('\n---  Round 5: bootstrapping to estimate parameter varaince  ---\n')
+
+    executor = concurrent.futures.ProcessPoolExecutor(threads)
+    futures = [executor.submit(bootstrapper, mle_full, mle_full_settings, model3b.x, gvs, bds1) for i in range(bootstraps)]
+    concurrent.futures.wait(futures)
+    
+    global_params = ['kd_exp','koff_exp','C','I_noise','CS_noise','amp']
+    for k in range(gvs):
+        bs_results = [x.result().x[k] for x in futures]
+        print(global_params[k]+' = '+str(round(model3b.x[k],2))+' +/- '+str(round(np.std(bs_results),2)))
+    
+    dfs['stderr'] = [np.std([x.result().x[gvs+r] for x in futures]) for r in range(len(residues))]
+    
+    
+    fig, ax = plt.subplots(figsize=(12,8))
+    ax.scatter('residue','dw',data=dfs[dfs.sig == False],color='black')
+    ax.errobar('residue','dw',yerr='stderr',data=dfs[dfs.sig == False],color='black',fmt='none')
+    ax.scatter('residue','dw',data=dfs[dfs.sig == True],color='red')
+    ax.errobar('residue','dw',yerr='stderr',data=dfs[dfs.sig == True],color='red',fmt='none')
+    ax.set(xlim=xl)
+    fig.savefig(fname_prefix+'_MaLICE_plot.png',dpi=600,bbox_inches='tight',pad_inches=0)
+
+    ## Print out data
     dfs.to_csv(fname_prefix+'_MaLICE_fits.csv',index=False)
     dfs[['residue','dw']].to_csv(fname_prefix+'_MaLICE_deltaw.txt',index=False,header=False)
 
