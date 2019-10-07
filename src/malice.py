@@ -584,11 +584,11 @@ def run_malice(config):
     with PdfPages(pdf_name) as pdf:
         for residue in residues:
             fig, ax = plt.subplots(ncols=2,figsize=(7.5,2.5))
-            ax[0].scatter('tit','csp',data=mleoutput[mleoutput.residue == residue],color='black',s=2)
-            ax[0].errorbar('tit','csp',data=mleoutput[mleoutput.residue == residue],yerr=model3b.x[4],color='black',fmt='none')
+            ax[0].scatter('tit','csp',data=mleoutput[mleoutput.residue == residue],color='black',s=10)
+            ax[0].errorbar('tit','csp',data=mleoutput[mleoutput.residue == residue],yerr=model3b.x[4],color='black',fmt='none',s=16)
             ax[0].plot('tit','cshat',data=fit_data[fit_data.residue == residue])
-            ax[1].scatter('tit','intensity',data=mleoutput[mleoutput.residue == residue],color='black',s=2)
-            ax[1].errorbar('tit','intensity',data=mleoutput[mleoutput.residue == residue],yerr=model3b.x[3],color='black',fmt='none')
+            ax[1].scatter('tit','intensity',data=mleoutput[mleoutput.residue == residue],color='black',s=10)
+            ax[1].errorbar('tit','intensity',data=mleoutput[mleoutput.residue == residue],yerr=model3b.x[3],color='black',fmt='none',s=16)
             ax[1].plot('tit','ihat',data=fit_data[fit_data.residue == residue])
             ax[0].set(xlim=xl, ylim=yl_csp, xlabel='Titrant (μM)', ylabel='CSP (Hz)', title='Residue '+str(residue)+' CSP')
             ax[1].set(xlim=xl, ylim=yl_int, xlabel='Titrant (μM)', ylabel='Intensity', title='Residue '+str(residue)+' Intensity')
@@ -629,11 +629,11 @@ def run_malice(config):
     
     png_name = os.path.join(config.output_dir, fname_prefix + '_MaLICE_plot.png')
     fig, ax = plt.subplots(figsize=(12,8))
-    ax.scatter('residue','dw',data=dfs[dfs.sig == False],color='black')
-    ax.errorbar('residue','dw',yerr='stderr',data=dfs[dfs.sig == False],color='black',fmt='none')
-    ax.scatter('residue','dw',data=dfs[dfs.sig == True],color='red')
-    ax.errorbar('residue','dw',yerr='stderr',data=dfs[dfs.sig == True],color='red',fmt='none')
-    ax.set(xlim=xl)
+    ax.scatter('residue','dw',data=dfs[dfs.sig == False],color='black',s=80)
+    ax.errorbar('residue','dw',yerr='stderr',data=dfs[dfs.sig == False],color='black',fmt='none',s=20)
+    ax.scatter('residue','dw',data=dfs[dfs.sig == True],color='red',s=80)
+    ax.errorbar('residue','dw',yerr='stderr',data=dfs[dfs.sig == True],color='red',fmt='none',s=20)
+    ax.set(xlim=(np.min(dfs.residue),np.max(dfs.residue)))
     fig.savefig(png_name,dpi=600,bbox_inches='tight',pad_inches=0)
 
     ## Print out data
