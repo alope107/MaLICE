@@ -637,7 +637,7 @@ def run_malice(config):
     ax.errorbar('residue','dw',yerr='stderr',data=dfs[dfs.sig == False],color='black',fmt='none',s=20)
     ax.scatter('residue','dw',data=dfs[dfs.sig == True],color='red',s=80)
     ax.errorbar('residue','dw',yerr='stderr',data=dfs[dfs.sig == True],color='red',fmt='none',s=20)
-    ax.set(xlim=(np.min(dfs.residue)+1,np.max(dfs.residue)+1),,xlabel='Residue',ylabel='Δω (Hz)')
+    ax.set(xlim=(np.min(dfs.residue)+1,np.max(dfs.residue)+1),xlabel='Residue',ylabel='Δω (Hz)')
     fig.savefig(png_name,dpi=600,bbox_inches='tight',pad_inches=0)
 
     ## Print out data
