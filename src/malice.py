@@ -91,7 +91,8 @@ def mle_lambda(params, settings):
     cs_broad = pa*pb*(pa-pb)*np.power(df.dw,3) * (np.square(kex)+(1-3*pa*pb)*np.square(df.dw))/broad_denom
     cshat = pb*df.dw - cs_broad
     csobs = larmor*(np.sqrt( np.square(nh_scale*(df['15N'] - df['15N_ref'])) + np.square(df['1H'] - df['1H_ref']) ))
-    logLL_cs = np.sum( stats.norm.logpdf(csobs, loc=cshat, scale=cs_noise) )
+    #logLL_cs = np.sum( stats.norm.logpdf(csobs, loc=cshat, scale=cs_noise) )
+    logLL_cs = np.sum ( stats.rayleigh.logpdf(np.square(csobs), loc=np.square(cshat), scale=np.square(cs_noise)) )
     
     negLL = -1*(logLL_int + logLL_cs - lam*np.sum(np.abs(df.dw)))
     
@@ -158,7 +159,8 @@ def refpeak_opt(params, settings):
     cs_broad = pa*pb*(pa-pb)*np.power(df.dw,3) * (np.square(kex)+(1-3*pa*pb)*np.square(df.dw))/broad_denom
     cshat = pb*df.dw - cs_broad
     csobs = larmor*(np.sqrt( np.square(nh_scale*(df['15N'] - df['15N_ref'])) + np.square(df['1H'] - df['1H_ref']) ))
-    logLL_cs = np.sum( stats.norm.logpdf(csobs, loc=cshat, scale=cs_noise) )
+    #logLL_cs = np.sum( stats.norm.logpdf(csobs, loc=cshat, scale=cs_noise) )
+    logLL_cs = np.sum ( stats.rayleigh.logpdf(np.square(csobs), loc=np.square(cshat), scale=np.square(cs_noise)) )
     
     negLL = -1*(logLL_int + logLL_cs)
     
@@ -218,7 +220,8 @@ def mle_reduced(params, settings):
     cs_broad = pa*pb*(pa-pb)*np.power(df.dw,3) * (np.square(kex)+(1-3*pa*pb)*np.square(df.dw))/broad_denom
     cshat = pb*df.dw - cs_broad
     csobs = larmor*(np.sqrt( np.square(nh_scale*(df['15N'] - df['15N_ref'])) + np.square(df['1H'] - df['1H_ref']) ))
-    logLL_cs = np.sum( stats.norm.logpdf(csobs, loc=cshat, scale=cs_noise) )
+    #logLL_cs = np.sum( stats.norm.logpdf(csobs, loc=cshat, scale=cs_noise) )
+    logLL_cs = np.sum ( stats.rayleigh.logpdf(np.square(csobs), loc=np.square(cshat), scale=np.square(cs_noise)) )
     
     negLL = -1*(logLL_int + logLL_cs)
     
@@ -264,7 +267,8 @@ def mle_full(params, settings):
     cs_broad = pa*pb*(pa-pb)*np.power(df.dw,3) * (np.square(kex)+(1-3*pa*pb)*np.square(df.dw))/broad_denom
     cshat = pb*df.dw - cs_broad
     csobs = larmor*(np.sqrt( np.square(nh_scale*(df['15N'] - df['15N_ref'])) + np.square(df['1H'] - df['1H_ref']) ))
-    logLL_cs = np.sum( stats.norm.logpdf(csobs, loc=cshat, scale=cs_noise) )
+    #logLL_cs = np.sum( stats.norm.logpdf(csobs, loc=cshat, scale=cs_noise) )
+    logLL_cs = np.sum ( stats.rayleigh.logpdf(np.square(csobs), loc=np.square(cshat), scale=np.square(cs_noise)) )
     
     negLL = -1*(logLL_int + logLL_cs)
     
@@ -633,7 +637,7 @@ def run_malice(config):
     ax.errorbar('residue','dw',yerr='stderr',data=dfs[dfs.sig == False],color='black',fmt='none',s=20)
     ax.scatter('residue','dw',data=dfs[dfs.sig == True],color='red',s=80)
     ax.errorbar('residue','dw',yerr='stderr',data=dfs[dfs.sig == True],color='red',fmt='none',s=20)
-    ax.set(xlim=(np.min(dfs.residue),np.max(dfs.residue)))
+    ax.set(xlim=(np.min(dfs.residue)+1,np.max(dfs.residue)+1),,xlabel='Residue',ylabel='Δω (Hz)')
     fig.savefig(png_name,dpi=600,bbox_inches='tight',pad_inches=0)
 
     ## Print out data
