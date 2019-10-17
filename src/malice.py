@@ -80,11 +80,19 @@ class MaliceOptimizer(object):
                                       'I_ref':params[2*int(len(params)/3):],'dw':self.model1[self.gvs:]})
         elif self.mode == 'dw_scale':
             Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise, scale = params[:8]
-            resparams = pd.DataFrame({'15N_ref':self.model2[:int(len(self.model2)/3)], 
+            resparams = pd.DataFrame({'residue':self.residues,
+                                      '15N_ref':self.model2[:int(len(self.model2)/3)], 
                                       '1H_ref':self.model2[int(len(self.model2)/3):2*int(len(self.model2)/3)],
-                                      'I_ref':self.model2[2*int(len(self.model2)/3):],
-                                      'residue':self.residues})
+                                      'I_ref':self.model2[2*int(len(self.model2)/3):]})
             resparams['dw'] = self.model1[self.gvs:]*scale
+        elif self.mode == 'final_opt':
+            Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise = params[:7]
+            resparams = pd.DataFrame({'residue':self.residues,
+                                      '15N_ref':self.model2[:int(len(self.model2)/3)], 
+                                      '1H_ref':self.model2[int(len(self.model2)/3):2*int(len(self.model2)/3)],
+                                      'I_ref':self.model2[2*int(len(self.model2)/3):]},
+                                      'dw':self.model1[self.gvs:])
+            
         else:
             print('UNSUPPORTED OPTIMIZATION MODE')
             return 0
@@ -409,7 +417,7 @@ def run_malice(config):
 
     init3b = list(model3a.x[:gvs]) + list(np.array(model1.x[gvs:])*model3a.x[-1])
     
-    optimizer.mode = 'global+dw'
+    optimizer.mode = 'final_opt'
 
     # Full minimization
     model3b = minimize(optimizer.mle, init3b, args=(mleinput,), method='SLSQP', bounds=bds3b,
