@@ -59,38 +59,29 @@ def _parse_args():
     
 class MaliceOptimizer(object):
 
-    def __init__(self, larmor=500,gvs=7,lam=.01,resgrouped=None,residues=None,mode=None):
+    def __init__(self, larmor=500,gvs=7,lam=.01,cs_dist='gaussian',resgrouped=None,residues=None,mode=None):
         self.larmor = larmor
         self.gvs = gvs
         self.lam = lam
         self.resgrouped = resgrouped
         self.residues = residues
         self.mode = mode
+        self.cs_dist = cs_dist
     
     def mle(self, params, settings):
         mleinput = settings['mleinput']
         
         if self.mode == 'global+dw':
-            Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise = params[0], params[1], params[2], \
-                                                                      params[3], params[4], params[5], \
-                                                                      params[6]
+            Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise = params[:7]
             resparams = self.resgrouped.copy().rename(columns={'intensity':'I_ref','15N':'15N_ref','1H':'1H_ref'})
             resparams['dw'] = params[self.gvs:]
         elif self.mode == 'refpeak_opt':
-            ## Bring in the relevant model
-            model1 = settings['model1']
-            Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise = model1[0], model1[1], model1[2], \
-                                                                      model1[3], model1[4], model1[5], \
-                                                                      model1[6]
+            Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise = self.model1[:7]
             resparams = pd.DataFrame({'residue':self.residues,'15N_ref':params[:int(len(params)/3)],
                                       '1H_ref':params[int(len(params)/3):2*int(len(params)/3)],
-                                      'I_ref':params[2*int(len(params)/3):],'dw':model1[self.gvs:]})
+                                      'I_ref':params[2*int(len(params)/3):],'dw':self.model1[self.gvs:]})
         elif self.mode == 'dw_scale':
-            Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise, scale = params[0], params[1], params[2], \
-                                                                             params[3], params[4], params[5], \
-                                                                             params[6], params[7]
-            
-            
+            Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise, scale = params[:8]
             resparams = pd.DataFrame({'15N_ref':self.model2[:int(len(self.model2)/3)], 
                                       '1H_ref':self.model2[int(len(self.model2)/3):2*int(len(self.model2)/3)],
                                       'I_ref':self.model2[2*int(len(self.model2)/3):],
@@ -128,9 +119,9 @@ class MaliceOptimizer(object):
         cshat = pb*df.dw - cs_broad
         csobs = self.larmor*(np.sqrt( np.square(nh_scale*(df['15N'] - df['15N_ref'])) + np.square(df['1H'] - df['1H_ref']) ))
         
-        if settings['cs_dist'] == 'gaussian':
+        if self.cs_dist == 'gaussian':
             logLL_cs = np.sum( stats.norm.logpdf(csobs, loc=cshat, scale=cs_noise) )
-        elif settings['cs_dist'] == 'rayleigh':
+        elif self.cs_dist == 'rayleigh':
             logLL_cs = np.sum ( stats.rayleigh.logpdf(np.abs(csobs-cshat)/cs_noise) - np.log(cs_noise) )
         else:
             print('INVALID CS DISTRIBUTION')
@@ -140,30 +131,29 @@ class MaliceOptimizer(object):
         
         return(negLL)
 
-def counter_factory(settings, optimizer):
-    mode, lam, gvs = settings['mode'], settings['lam'], settings['gvs']
+    def counter_factory(self, settings):
 
-    if mode == 'global+dw':
-        def counter(xk, convergence=1e-7):
-            global i
-            if i%1000 == 0:
-                print(str(i).ljust(8)+'Score: '+str(round(optimizer.mle(xk, settings),2)).ljust(12)+
-                      '-logL: '+str(round(optimizer.mle(xk, settings)-lam*np.sum(xk[gvs:]),2)).ljust(12)+
-                      'Kd: '+str(round(np.power(10,xk[0]),1)).ljust(10)+
-                      'dR2: '+str(round(xk[2],2)).ljust(8)+
-                      'max_dw: '+str(round(np.max(xk[gvs:]),2)))
-            i+=1
-        return counter
-    elif mode == 'refpeak_opt':
-        def counter(xk,convergence=1e-7):
-            global i
-            if i%1000 == 0:
-                print(str(i).ljust(8)+'-logL: '+str(round(optimizer.mle(xk, settings),2)).ljust(12))
-            i+=1
-        return counter
-    else:
-        print('INVALID MODE FOR COUNTER')
-        return 0
+        if self.mode == 'global+dw':
+            def counter(xk, convergence=1e-7):
+                global i
+                if i%1000 == 0:
+                    print(str(i).ljust(8)+'Score: '+str(round(self.mle(xk, settings),2)).ljust(12)+
+                          '-logL: '+str(round(self.mle(xk, settings)-self.lam*np.sum(xk[self.gvs:]),2)).ljust(12)+
+                          'Kd: '+str(round(np.power(10,xk[0]),1)).ljust(10)+
+                          'dR2: '+str(round(xk[2],2)).ljust(8)+
+                          'max_dw: '+str(round(np.max(xk[self.gvs:]),2)))
+                i+=1
+            return counter
+        elif self.mode == 'refpeak_opt':
+            def counter(xk,convergence=1e-7):
+                global i
+                if i%1000 == 0:
+                    print(str(i).ljust(8)+'-logL: '+str(round(self.mle(xk, settings),2)).ljust(12))
+                i+=1
+            return counter
+        else:
+            print('INVALID MODE FOR COUNTER')
+            return 0
 
 def model_fitter(df, model3b):
     Kd_exp = model3b.x[0]
@@ -305,7 +295,8 @@ def run_malice(config):
                                 lam=lam,  
                                 resgrouped=resgrouped,
                                 residues=residues, 
-                                mode='global+dw')
+                                mode='global+dw',
+                                cs_dist='gaussian')
 
     ## Perform pop_iter replicates of pop_size member populations
     print('\n---  Round 1: initial global variable and delta w optimization  ---\n')
@@ -340,7 +331,7 @@ def run_malice(config):
         initfit = differential_evolution(optimizer.mle, bds1, args=(mle_lam_settings,), init = pop, updating='deferred', 
                                          workers = config.thread_count, mutation=(0.5,1.9),maxiter = config.evo_max_iter, 
                                          strategy = 'best1bin', polish = False, recombination = 0.7, 
-                                         tol=1e-6, disp=False, callback=counter_factory(mle_lam_settings, optimizer))
+                                         tol=1e-6, disp=False, callback=optimizer.counter_factory(mle_lam_settings))
         print('\n'+str(round(initfit.fun - lam*np.sum(initfit.x[gvs:]),2))+'\n')
         models1.append(initfit)
 
@@ -383,7 +374,7 @@ def run_malice(config):
         ref_opt = differential_evolution(optimizer.mle, bds2, args=(refpeak_settings,), init = pop, updating='deferred', 
                                          workers = config.thread_count, mutation=(0.5,1.9), maxiter = config.evo_max_iter, 
                                          strategy = 'best1bin', polish = False, recombination = 0.7,
-                                         tol=1e-7, disp=False, callback=counter_factory(refpeak_settings, optimizer))
+                                         tol=1e-7, disp=False, callback=optimizer.counter_factory(refpeak_settings))
         print('\n'+str(round(ref_opt.fun,2))+'\n')
         models2.append(ref_opt)
 
