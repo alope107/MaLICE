@@ -56,95 +56,102 @@ def _parse_args():
                         help='Whether to use a deterministic seed.')
     # TODO: validate arguments
     return parser.parse_args()
-
-
-def mle(params,settings):
-    gvs, larmor, lam, resgrouped, mleinput, residues, mode = settings['gvs'], settings['larmor'], \
-                                                             settings['lam'], settings['resgrouped'], \
-                                                             settings['mleinput'], settings['residues'], \
-                                                             settings['mode']
     
-    if mode == 'global+dw':
-        Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise = params[0], params[1], params[2], \
-                                                                  params[3], params[4], params[5], \
-                                                                  params[6]
-        resparams = resgrouped.copy().rename(columns={'intensity':'I_ref','15N':'15N_ref','1H':'1H_ref'})
-        resparams['dw'] = params[gvs:]
-    elif mode == 'refpeak_opt':
-        ## Bring in the relevant model
-        model1 = settings['model1']
-        Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise = model1[0], model1[1], model1[2], \
-                                                                  model1[3], model1[4], model1[5], \
-                                                                  model1[6]
-        resparams = pd.DataFrame({'residue':residues,'15N_ref':params[:int(len(params)/3)],
-                                  '1H_ref':params[int(len(params)/3):2*int(len(params)/3)],
-                                  'I_ref':params[2*int(len(params)/3):],'dw':model1[gvs:]})
-    elif mode == 'dw_scale':
-        Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise, scale = params[0], params[1], params[2], \
-                                                                         params[3], params[4], params[5], \
-                                                                         params[6], params[7]
+class MaliceOptimizer(object):
+
+    def __init__(self, larmor=500,gvs=7,lam=.01,nh_scale =.2):
+        self.larmor = larmor
+        self.gvs = gvs
+        self.lam = lam
+        self.nh_scale = nh_scale
+    
+    def mle(self, params,settings):
+        gvs, larmor, lam, resgrouped, mleinput, residues, mode = settings['gvs'], settings['larmor'], \
+                                                                 settings['lam'], settings['resgrouped'], \
+                                                                 settings['mleinput'], settings['residues'], \
+                                                                 settings['mode']
         
-        model1 = settings['model1']
-        model2 = settings['model2']
+        if mode == 'global+dw':
+            Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise = params[0], params[1], params[2], \
+                                                                      params[3], params[4], params[5], \
+                                                                      params[6]
+            resparams = resgrouped.copy().rename(columns={'intensity':'I_ref','15N':'15N_ref','1H':'1H_ref'})
+            resparams['dw'] = params[gvs:]
+        elif mode == 'refpeak_opt':
+            ## Bring in the relevant model
+            model1 = settings['model1']
+            Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise = model1[0], model1[1], model1[2], \
+                                                                      model1[3], model1[4], model1[5], \
+                                                                      model1[6]
+            resparams = pd.DataFrame({'residue':residues,'15N_ref':params[:int(len(params)/3)],
+                                      '1H_ref':params[int(len(params)/3):2*int(len(params)/3)],
+                                      'I_ref':params[2*int(len(params)/3):],'dw':model1[gvs:]})
+        elif mode == 'dw_scale':
+            Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise, scale = params[0], params[1], params[2], \
+                                                                             params[3], params[4], params[5], \
+                                                                             params[6], params[7]
+            
+            model1 = settings['model1']
+            model2 = settings['model2']
+            
+            resparams = pd.DataFrame({'15N_ref':model2[:int(len(model2)/3)], 
+                                      '1H_ref':model2[int(len(model2)/3):2*int(len(model2)/3)],
+                                      'I_ref':model2[2*int(len(model2)/3):],
+                                      'residue':residues})
+            resparams['dw'] = model1[gvs:]*scale
+        else:
+            print('UNSUPPORTED OPTIMIZATION MODE')
+            return 0
         
-        resparams = pd.DataFrame({'15N_ref':model2[:int(len(model2)/3)], 
-                                  '1H_ref':model2[int(len(model2)/3):2*int(len(model2)/3)],
-                                  'I_ref':model2[2*int(len(model2)/3):],
-                                  'residue':residues})
-        resparams['dw'] = model1[gvs:]*scale
-    else:
-        print('UNSUPPORTED OPTIMIZATION MODE')
-        return 0
-    
-    df = pd.merge(mleinput,resparams,on='residue')
-    
-    Kd = np.power(10,Kd_exp)
-    koff = np.power(10,koff_exp)
-    kon = koff/Kd
-    
-    dimer = ( (df.obs + df.tit + Kd) - np.sqrt( np.power((df.obs + df.tit + Kd),2) - 4*df.obs*df.tit ) )/2
-    pb = dimer/df.obs
-    pa = 1 - pb
-    
-    #Assume 1:1 stoichiometry for now
-    free_tit = df.tit - dimer
-    kr = koff
-    kf = free_tit*kon
-    kex = kr + kf
-    
-    broad_denom = np.square(np.square(kex) + (1-5*pa*pb)*np.square(df.dw)) + 4*pa*pb*(1-4*pa*pb)*np.power(df.dw,4)
-    
-    #Calculate intensity likelihood
-    i_broad = pa*pb*np.square(df.dw)*kex * (np.square(kex)+(1-5*pa*pb)*np.square(df.dw))/broad_denom
-    ihat = df.I_ref/( pa + pb + df.I_ref*(pb*dR2 + i_broad)/amp )
-    logLL_int = np.sum( stats.norm.logpdf(df.intensity, loc=ihat, scale=i_noise) )
-    
-    #Calculate cs likelihood
-    cs_broad = pa*pb*(pa-pb)*np.power(df.dw,3) * (np.square(kex)+(1-3*pa*pb)*np.square(df.dw))/broad_denom
-    cshat = pb*df.dw - cs_broad
-    csobs = larmor*(np.sqrt( np.square(nh_scale*(df['15N'] - df['15N_ref'])) + np.square(df['1H'] - df['1H_ref']) ))
-    
-    if settings['cs_dist'] == 'gaussian':
-        logLL_cs = np.sum( stats.norm.logpdf(csobs, loc=cshat, scale=cs_noise) )
-    elif settings['cs_dist'] == 'rayleigh':
-        logLL_cs = np.sum ( stats.rayleigh.logpdf(np.abs(csobs-cshat)/cs_noise) - np.log(cs_noise) )
-    else:
-        print('INVALID CS DISTRIBUTION')
-        return 0
-    
-    negLL = -1*(logLL_int + logLL_cs - lam*np.sum(np.abs(df.dw)))
-    
-    return(negLL)
+        df = pd.merge(mleinput,resparams,on='residue')
+        
+        Kd = np.power(10,Kd_exp)
+        koff = np.power(10,koff_exp)
+        kon = koff/Kd
+        
+        dimer = ( (df.obs + df.tit + Kd) - np.sqrt( np.power((df.obs + df.tit + Kd),2) - 4*df.obs*df.tit ) )/2
+        pb = dimer/df.obs
+        pa = 1 - pb
+        
+        #Assume 1:1 stoichiometry for now
+        free_tit = df.tit - dimer
+        kr = koff
+        kf = free_tit*kon
+        kex = kr + kf
+        
+        broad_denom = np.square(np.square(kex) + (1-5*pa*pb)*np.square(df.dw)) + 4*pa*pb*(1-4*pa*pb)*np.power(df.dw,4)
+        
+        #Calculate intensity likelihood
+        i_broad = pa*pb*np.square(df.dw)*kex * (np.square(kex)+(1-5*pa*pb)*np.square(df.dw))/broad_denom
+        ihat = df.I_ref/( pa + pb + df.I_ref*(pb*dR2 + i_broad)/amp )
+        logLL_int = np.sum( stats.norm.logpdf(df.intensity, loc=ihat, scale=i_noise) )
+        
+        #Calculate cs likelihood
+        cs_broad = pa*pb*(pa-pb)*np.power(df.dw,3) * (np.square(kex)+(1-3*pa*pb)*np.square(df.dw))/broad_denom
+        cshat = pb*df.dw - cs_broad
+        csobs = larmor*(np.sqrt( np.square(nh_scale*(df['15N'] - df['15N_ref'])) + np.square(df['1H'] - df['1H_ref']) ))
+        
+        if settings['cs_dist'] == 'gaussian':
+            logLL_cs = np.sum( stats.norm.logpdf(csobs, loc=cshat, scale=cs_noise) )
+        elif settings['cs_dist'] == 'rayleigh':
+            logLL_cs = np.sum ( stats.rayleigh.logpdf(np.abs(csobs-cshat)/cs_noise) - np.log(cs_noise) )
+        else:
+            print('INVALID CS DISTRIBUTION')
+            return 0
+        
+        negLL = -1*(logLL_int + logLL_cs - lam*np.sum(np.abs(df.dw)))
+        
+        return(negLL)
 
-def counter_factory(settings):
+def counter_factory(settings, optimizer):
     mode, lam, gvs = settings['mode'], settings['lam'], settings['gvs']
 
     if mode == 'global+dw':
         def counter(xk, convergence=1e-7):
             global i
             if i%1000 == 0:
-                print(str(i).ljust(8)+'Score: '+str(round(mle(xk, settings),2)).ljust(12)+
-                      '-logL: '+str(round(mle(xk, settings)-lam*np.sum(xk[gvs:]),2)).ljust(12)+
+                print(str(i).ljust(8)+'Score: '+str(round(optimizer.mle(xk, settings),2)).ljust(12)+
+                      '-logL: '+str(round(optimizer.mle(xk, settings)-lam*np.sum(xk[gvs:]),2)).ljust(12)+
                       'Kd: '+str(round(np.power(10,xk[0]),1)).ljust(10)+
                       'dR2: '+str(round(xk[2],2)).ljust(8)+
                       'max_dw: '+str(round(np.max(xk[gvs:]),2)))
@@ -154,7 +161,7 @@ def counter_factory(settings):
         def counter(xk,convergence=1e-7):
             global i
             if i%1000 == 0:
-                print(str(i).ljust(8)+'-logL: '+str(round(mle(xk, settings),2)).ljust(12))
+                print(str(i).ljust(8)+'-logL: '+str(round(optimizer.mle(xk, settings),2)).ljust(12))
             i+=1
         return counter
     else:
@@ -295,6 +302,8 @@ def run_malice(config):
         'cs_dist' : 'gaussian',
         'mode' : 'global+dw'
     }
+    
+    optimizer = MaliceOptimizer()
 
     ## Perform pop_iter replicates of pop_size member populations
     print('\n---  Round 1: initial global variable and delta w optimization  ---\n')
@@ -326,10 +335,10 @@ def run_malice(config):
         ## Run the job
         print('Round 1 - Population # '+str(iteration+1))
         i = 0
-        initfit = differential_evolution(mle, bds1, args=(mle_lam_settings,), init = pop, updating='deferred', 
+        initfit = differential_evolution(optimizer.mle, bds1, args=(mle_lam_settings,), init = pop, updating='deferred', 
                                          workers = config.thread_count, mutation=(0.5,1.9),maxiter = config.evo_max_iter, 
                                          strategy = 'best1bin', polish = False, recombination = 0.7, 
-                                         tol=1e-6, disp=False, callback=counter_factory(mle_lam_settings))
+                                         tol=1e-6, disp=False, callback=counter_factory(mle_lam_settings, optimizer))
         print('\n'+str(round(initfit.fun - lam*np.sum(initfit.x[gvs:]),2))+'\n')
         models1.append(initfit)
 
@@ -366,10 +375,10 @@ def run_malice(config):
         
         print('Round 2 - Population #'+str(z+1))
         i = 0
-        ref_opt = differential_evolution(mle, bds2, args=(refpeak_settings,), init = pop, updating='deferred', 
+        ref_opt = differential_evolution(optimizer.mle, bds2, args=(refpeak_settings,), init = pop, updating='deferred', 
                                          workers = config.thread_count, mutation=(0.5,1.9), maxiter = config.evo_max_iter, 
                                          strategy = 'best1bin', polish = False, recombination = 0.7,
-                                         tol=1e-7, disp=False, callback=counter_factory(refpeak_settings))
+                                         tol=1e-7, disp=False, callback=counter_factory(refpeak_settings, optimizer))
         print('\n'+str(round(ref_opt.fun,2))+'\n')
         models2.append(ref_opt)
 
@@ -378,7 +387,7 @@ def run_malice(config):
     model2 = models2[0]
 
     ## Polish the reference peaks
-    model2opt = minimize(mle, model2.x, args=(refpeak_settings,), method='SLSQP',bounds=bds2,
+    model2opt = minimize(optimizer.mle, model2.x, args=(refpeak_settings,), method='SLSQP',bounds=bds2,
                          tol=1e-7, options={'disp':True,'maxiter': config.least_squares_max_iter})
 
     ## Stage 3 - polish off the model with gradient minimization
@@ -405,7 +414,7 @@ def run_malice(config):
     mle_reduced_settings['lam'] = 0
     mle_reduced_settings['mode'] = 'dw_scale'
 
-    model3a = minimize(mle, init3a, args=(mle_reduced_settings,), method='SLSQP',bounds=bds3a,
+    model3a = minimize(optimizer.mle, init3a, args=(mle_reduced_settings,), method='SLSQP',bounds=bds3a,
                        tol=1e-7,options={'disp':True,'maxiter':config.least_squares_max_iter})
 
 
@@ -429,7 +438,7 @@ def run_malice(config):
     mle_full_settings['mode'] = 'global+dw'
 
     # Full minimization
-    model3b = minimize(mle, init3b, args=(mle_full_settings,), method='SLSQP', bounds=bds3b,
+    model3b = minimize(optimizer.mle, init3b, args=(mle_full_settings,), method='SLSQP', bounds=bds3b,
                       tol=1e-7, options={'disp':True,'maxiter':config.least_squares_max_iter})
 
     print('\nFinal Score = '+str(round(model3b.fun,2)))
@@ -502,7 +511,7 @@ def run_malice(config):
     ## Perform likelihood ratio tests
     print('\n---  Round 4: likelihood ratio test of parameters  ---\n')
     executor = concurrent.futures.ProcessPoolExecutor(config.thread_count)
-    futures = [executor.submit(null_calculator, mle, config, mle_full_settings, model3b.x, dfs, gvs, bds1, r) for r in residues]
+    futures = [executor.submit(null_calculator, optimizer.mle, config, mle_full_settings, model3b.x, dfs, gvs, bds1, r) for r in residues]
     concurrent.futures.wait(futures)
 
     dfs['altLL'] = -1 * model3b.fun
@@ -518,7 +527,7 @@ def run_malice(config):
     print('\n---  Round 5: bootstrapping to estimate parameter variance  ---\n')
 
     executor = concurrent.futures.ProcessPoolExecutor(config.thread_count)
-    futures = [executor.submit(bootstrapper, mle, config, mle_full_settings, model3b.x, gvs, bds1) for i in range(bootstraps)]
+    futures = [executor.submit(bootstrapper, optimizer.mle, config, mle_full_settings, model3b.x, gvs, bds1) for i in range(bootstraps)]
     concurrent.futures.wait(futures)
     
     global_params = ['Kd_exp','koff_exp','dR2','Amp','nh_scale','I_noise','CS_noise']
