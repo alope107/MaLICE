@@ -68,9 +68,7 @@ class MaliceOptimizer(object):
         self.mode = mode
         self.cs_dist = cs_dist
     
-    def mle(self, params, settings):
-        mleinput = settings['mleinput']
-        
+    def mle(self, params, mleinput):
         if self.mode == 'global+dw':
             Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise = params[:7]
             resparams = self.resgrouped.copy().rename(columns={'intensity':'I_ref','15N':'15N_ref','1H':'1H_ref'})
@@ -131,14 +129,14 @@ class MaliceOptimizer(object):
         
         return(negLL)
 
-    def counter_factory(self, settings):
+    def counter_factory(self, mleinput):
 
         if self.mode == 'global+dw':
             def counter(xk, convergence=1e-7):
                 global i
                 if i%1000 == 0:
-                    print(str(i).ljust(8)+'Score: '+str(round(self.mle(xk, settings),2)).ljust(12)+
-                          '-logL: '+str(round(self.mle(xk, settings)-self.lam*np.sum(xk[self.gvs:]),2)).ljust(12)+
+                    print(str(i).ljust(8)+'Score: '+str(round(self.mle(xk, mleinput),2)).ljust(12)+
+                          '-logL: '+str(round(self.mle(xk, mleinput)-self.lam*np.sum(xk[self.gvs:]),2)).ljust(12)+
                           'Kd: '+str(round(np.power(10,xk[0]),1)).ljust(10)+
                           'dR2: '+str(round(xk[2],2)).ljust(8)+
                           'max_dw: '+str(round(np.max(xk[self.gvs:]),2)))
@@ -148,7 +146,7 @@ class MaliceOptimizer(object):
             def counter(xk,convergence=1e-7):
                 global i
                 if i%1000 == 0:
-                    print(str(i).ljust(8)+'-logL: '+str(round(self.mle(xk, settings),2)).ljust(12))
+                    print(str(i).ljust(8)+'-logL: '+str(round(self.mle(xk, mleinput),2)).ljust(12))
                 i+=1
             return counter
         else:
@@ -190,7 +188,7 @@ def model_fitter(df, model3b):
     
     return df
 
-def null_calculator(fx, config, stngs, model, df, gvs, bds, res):
+def null_calculator(fx, config, mleinput, model, df, gvs, bds, res):
     dfx = df.copy()
     dfx.loc[dfx.residue == res,'dw'] = 0
     
@@ -208,17 +206,15 @@ def null_calculator(fx, config, stngs, model, df, gvs, bds, res):
     initx = list(model)
     
     # Minimize
-    nullLL = minimize(fx, initx, args=(stngs,), method='SLSQP', bounds=bdsx,
+    nullLL = minimize(fx, initx, args=(mleinput,), method='SLSQP', bounds=bdsx,
                       tol=1e-7, options={'disp':True,'maxiter':config.least_squares_max_iter})
 
     print('null LogL calculated for residue '+str(res))
     
     return nullLL.fun
 
-def bootstrapper(fx, config, stngs, model, gvs, bds):
-    
-    bs_settings = stngs.copy()
-    bs_settings['mleinput'] = stngs['mleinput'].sample(frac=1,replace=True)
+def bootstrapper(fx, config, mleinput, model, gvs, bds):
+    mleinput = mleinput.sample(frac=1,replace=True)
     
     mininit = [model[0]-0.2, model[1]-0.2, model[2]-10, model[3]/1.2,
                model[4]/1.2, model[5]/1.2, model[6]/1.2] + list(model[gvs:]/2)
@@ -234,7 +230,7 @@ def bootstrapper(fx, config, stngs, model, gvs, bds):
     initx = list(model)
     
     ## Run the minimizer
-    bootstrap = minimize(fx, initx, args=(bs_settings,), method='SLSQP', bounds=bdsx,
+    bootstrap = minimize(fx, initx, args=(mleinput,), method='SLSQP', bounds=bdsx,
                          tol=1e-7, options={'disp':False,'maxiter':config.least_squares_max_iter})
     
     return bootstrap
@@ -277,18 +273,6 @@ def run_malice(config):
         resgrouped['intensity'] = [x + np.random.normal()*np.mean(mleinput.intensity)/100 for x in list(resgrouped['intensity'])]
         
     i_noise_est = np.mean(mleinput.intensity)/10
-
-    
-    mle_lam_settings = {
-        'larmor' : larmor,
-        'gvs' : gvs,
-        'lam' : lam,
-        'resgrouped': resgrouped,
-        'mleinput' : mleinput,
-        'residues' : residues,
-        'cs_dist' : 'gaussian',
-        'mode' : 'global+dw'
-    }
     
     optimizer = MaliceOptimizer(larmor=larmor, 
                                 gvs=gvs, 
@@ -328,10 +312,10 @@ def run_malice(config):
         ## Run the job
         print('Round 1 - Population # '+str(iteration+1))
         i = 0
-        initfit = differential_evolution(optimizer.mle, bds1, args=(mle_lam_settings,), init = pop, updating='deferred', 
+        initfit = differential_evolution(optimizer.mle, bds1, args=(mleinput,), init = pop, updating='deferred', 
                                          workers = config.thread_count, mutation=(0.5,1.9),maxiter = config.evo_max_iter, 
                                          strategy = 'best1bin', polish = False, recombination = 0.7, 
-                                         tol=1e-6, disp=False, callback=optimizer.counter_factory(mle_lam_settings))
+                                         tol=1e-6, disp=False, callback=optimizer.counter_factory(mleinput))
         print('\n'+str(round(initfit.fun - lam*np.sum(initfit.x[gvs:]),2))+'\n')
         models1.append(initfit)
 
@@ -339,10 +323,6 @@ def run_malice(config):
     models1.sort(key=lambda y:y.fun - lam*np.sum(y.x[gvs:]))
     model1 = models1[0]
     
-    refpeak_settings = mle_lam_settings.copy()
-    refpeak_settings['model1'] = model1.x
-    refpeak_settings['residues'] = residues
-    refpeak_settings['mode'] = 'refpeak_opt'
     optimizer.model1 = model1.x
     optimizer.residues = residues
     optimizer.mode = 'refpeak_opt'
@@ -371,10 +351,10 @@ def run_malice(config):
         
         print('Round 2 - Population #'+str(z+1))
         i = 0
-        ref_opt = differential_evolution(optimizer.mle, bds2, args=(refpeak_settings,), init = pop, updating='deferred', 
+        ref_opt = differential_evolution(optimizer.mle, bds2, args=(mleinput,), init = pop, updating='deferred', 
                                          workers = config.thread_count, mutation=(0.5,1.9), maxiter = config.evo_max_iter, 
                                          strategy = 'best1bin', polish = False, recombination = 0.7,
-                                         tol=1e-7, disp=False, callback=optimizer.counter_factory(refpeak_settings))
+                                         tol=1e-7, disp=False, callback=optimizer.counter_factory(mleinput))
         print('\n'+str(round(ref_opt.fun,2))+'\n')
         models2.append(ref_opt)
 
@@ -383,7 +363,7 @@ def run_malice(config):
     model2 = models2[0]
 
     ## Polish the reference peaks
-    model2opt = minimize(optimizer.mle, model2.x, args=(refpeak_settings,), method='SLSQP',bounds=bds2,
+    model2opt = minimize(optimizer.mle, model2.x, args=(mleinput,), method='SLSQP',bounds=bds2,
                          tol=1e-7, options={'disp':True,'maxiter': config.least_squares_max_iter})
 
     ## Stage 3 - polish off the model with gradient minimization
@@ -405,15 +385,11 @@ def run_malice(config):
 
     init3a = list(model1.x[:gvs]) + [1]
     
-    mle_reduced_settings = refpeak_settings.copy()
-    mle_reduced_settings['model2'] = model2opt.x
-    mle_reduced_settings['lam'] = 0
-    mle_reduced_settings['mode'] = 'dw_scale'
     optimizer.model2 = model2opt.x
     optimizer.lam=0
     optimizer.mode = 'dw_scale'
 
-    model3a = minimize(optimizer.mle, init3a, args=(mle_reduced_settings,), method='SLSQP',bounds=bds3a,
+    model3a = minimize(optimizer.mle, init3a, args=(mleinput,), method='SLSQP',bounds=bds3a,
                        tol=1e-7,options={'disp':True,'maxiter':config.least_squares_max_iter})
 
 
@@ -433,12 +409,10 @@ def run_malice(config):
 
     init3b = list(model3a.x[:gvs]) + list(np.array(model1.x[gvs:])*model3a.x[-1])
     
-    mle_full_settings = mle_reduced_settings.copy()
-    mle_full_settings['mode'] = 'global+dw'
     optimizer.mode = 'global+dw'
 
     # Full minimization
-    model3b = minimize(optimizer.mle, init3b, args=(mle_full_settings,), method='SLSQP', bounds=bds3b,
+    model3b = minimize(optimizer.mle, init3b, args=(mleinput,), method='SLSQP', bounds=bds3b,
                       tol=1e-7, options={'disp':True,'maxiter':config.least_squares_max_iter})
 
     print('\nFinal Score = '+str(round(model3b.fun,2)))
@@ -511,7 +485,7 @@ def run_malice(config):
     ## Perform likelihood ratio tests
     print('\n---  Round 4: likelihood ratio test of parameters  ---\n')
     executor = concurrent.futures.ProcessPoolExecutor(config.thread_count)
-    futures = [executor.submit(null_calculator, optimizer.mle, config, mle_full_settings, model3b.x, dfs, gvs, bds1, r) for r in residues]
+    futures = [executor.submit(null_calculator, optimizer.mle, config, mleinput, model3b.x, dfs, gvs, bds1, r) for r in residues]
     concurrent.futures.wait(futures)
 
     dfs['altLL'] = -1 * model3b.fun
@@ -527,7 +501,7 @@ def run_malice(config):
     print('\n---  Round 5: bootstrapping to estimate parameter variance  ---\n')
 
     executor = concurrent.futures.ProcessPoolExecutor(config.thread_count)
-    futures = [executor.submit(bootstrapper, optimizer.mle, config, mle_full_settings, model3b.x, gvs, bds1) for i in range(bootstraps)]
+    futures = [executor.submit(bootstrapper, optimizer.mle, config, mleinput, model3b.x, gvs, bds1) for i in range(bootstraps)]
     concurrent.futures.wait(futures)
     
     global_params = ['Kd_exp','koff_exp','dR2','Amp','nh_scale','I_noise','CS_noise']
