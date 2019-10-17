@@ -90,8 +90,8 @@ class MaliceOptimizer(object):
             resparams = pd.DataFrame({'residue':self.residues,
                                       '15N_ref':self.model2[:int(len(self.model2)/3)], 
                                       '1H_ref':self.model2[int(len(self.model2)/3):2*int(len(self.model2)/3)],
-                                      'I_ref':self.model2[2*int(len(self.model2)/3):]},
-                                      'dw':self.model1[self.gvs:])
+                                      'I_ref':self.model2[2*int(len(self.model2)/3):],
+                                      'dw':self.model1[self.gvs:]})
             
         else:
             print('UNSUPPORTED OPTIMIZATION MODE')
