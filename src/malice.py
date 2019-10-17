@@ -59,46 +59,43 @@ def _parse_args():
     
 class MaliceOptimizer(object):
 
-    def __init__(self, larmor=500,gvs=7,lam=.01,nh_scale =.2):
+    def __init__(self, larmor=500,gvs=7,lam=.01,resgrouped=None,residues=None,mode=None):
         self.larmor = larmor
         self.gvs = gvs
         self.lam = lam
-        self.nh_scale = nh_scale
+        self.resgrouped = resgrouped
+        self.residues = residues
+        self.mode = mode
     
-    def mle(self, params,settings):
-        gvs, larmor, lam, resgrouped, mleinput, residues, mode = settings['gvs'], settings['larmor'], \
-                                                                 settings['lam'], settings['resgrouped'], \
-                                                                 settings['mleinput'], settings['residues'], \
-                                                                 settings['mode']
+    def mle(self, params, settings):
+        mleinput = settings['mleinput']
         
-        if mode == 'global+dw':
+        if self.mode == 'global+dw':
             Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise = params[0], params[1], params[2], \
                                                                       params[3], params[4], params[5], \
                                                                       params[6]
-            resparams = resgrouped.copy().rename(columns={'intensity':'I_ref','15N':'15N_ref','1H':'1H_ref'})
-            resparams['dw'] = params[gvs:]
-        elif mode == 'refpeak_opt':
+            resparams = self.resgrouped.copy().rename(columns={'intensity':'I_ref','15N':'15N_ref','1H':'1H_ref'})
+            resparams['dw'] = params[self.gvs:]
+        elif self.mode == 'refpeak_opt':
             ## Bring in the relevant model
             model1 = settings['model1']
             Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise = model1[0], model1[1], model1[2], \
                                                                       model1[3], model1[4], model1[5], \
                                                                       model1[6]
-            resparams = pd.DataFrame({'residue':residues,'15N_ref':params[:int(len(params)/3)],
+            resparams = pd.DataFrame({'residue':self.residues,'15N_ref':params[:int(len(params)/3)],
                                       '1H_ref':params[int(len(params)/3):2*int(len(params)/3)],
-                                      'I_ref':params[2*int(len(params)/3):],'dw':model1[gvs:]})
-        elif mode == 'dw_scale':
+                                      'I_ref':params[2*int(len(params)/3):],'dw':model1[self.gvs:]})
+        elif self.mode == 'dw_scale':
             Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise, scale = params[0], params[1], params[2], \
                                                                              params[3], params[4], params[5], \
                                                                              params[6], params[7]
             
-            model1 = settings['model1']
-            model2 = settings['model2']
             
-            resparams = pd.DataFrame({'15N_ref':model2[:int(len(model2)/3)], 
-                                      '1H_ref':model2[int(len(model2)/3):2*int(len(model2)/3)],
-                                      'I_ref':model2[2*int(len(model2)/3):],
-                                      'residue':residues})
-            resparams['dw'] = model1[gvs:]*scale
+            resparams = pd.DataFrame({'15N_ref':self.model2[:int(len(self.model2)/3)], 
+                                      '1H_ref':self.model2[int(len(self.model2)/3):2*int(len(self.model2)/3)],
+                                      'I_ref':self.model2[2*int(len(self.model2)/3):],
+                                      'residue':self.residues})
+            resparams['dw'] = self.model1[self.gvs:]*scale
         else:
             print('UNSUPPORTED OPTIMIZATION MODE')
             return 0
@@ -129,7 +126,7 @@ class MaliceOptimizer(object):
         #Calculate cs likelihood
         cs_broad = pa*pb*(pa-pb)*np.power(df.dw,3) * (np.square(kex)+(1-3*pa*pb)*np.square(df.dw))/broad_denom
         cshat = pb*df.dw - cs_broad
-        csobs = larmor*(np.sqrt( np.square(nh_scale*(df['15N'] - df['15N_ref'])) + np.square(df['1H'] - df['1H_ref']) ))
+        csobs = self.larmor*(np.sqrt( np.square(nh_scale*(df['15N'] - df['15N_ref'])) + np.square(df['1H'] - df['1H_ref']) ))
         
         if settings['cs_dist'] == 'gaussian':
             logLL_cs = np.sum( stats.norm.logpdf(csobs, loc=cshat, scale=cs_noise) )
@@ -139,7 +136,7 @@ class MaliceOptimizer(object):
             print('INVALID CS DISTRIBUTION')
             return 0
         
-        negLL = -1*(logLL_int + logLL_cs - lam*np.sum(np.abs(df.dw)))
+        negLL = -1*(logLL_int + logLL_cs - self.lam*np.sum(np.abs(df.dw)))
         
         return(negLL)
 
@@ -303,7 +300,12 @@ def run_malice(config):
         'mode' : 'global+dw'
     }
     
-    optimizer = MaliceOptimizer()
+    optimizer = MaliceOptimizer(larmor=larmor, 
+                                gvs=gvs, 
+                                lam=lam,  
+                                resgrouped=resgrouped,
+                                residues=residues, 
+                                mode='global+dw')
 
     ## Perform pop_iter replicates of pop_size member populations
     print('\n---  Round 1: initial global variable and delta w optimization  ---\n')
@@ -350,6 +352,9 @@ def run_malice(config):
     refpeak_settings['model1'] = model1.x
     refpeak_settings['residues'] = residues
     refpeak_settings['mode'] = 'refpeak_opt'
+    optimizer.model1 = model1.x
+    optimizer.residues = residues
+    optimizer.mode = 'refpeak_opt'
 
     ## Stage 2 - reference peak optimization
     print('\n---  Round 2: reference peak optimization  ---\n')
@@ -413,6 +418,9 @@ def run_malice(config):
     mle_reduced_settings['model2'] = model2opt.x
     mle_reduced_settings['lam'] = 0
     mle_reduced_settings['mode'] = 'dw_scale'
+    optimizer.model2 = model2opt.x
+    optimizer.lam=0
+    optimizer.mode = 'dw_scale'
 
     model3a = minimize(optimizer.mle, init3a, args=(mle_reduced_settings,), method='SLSQP',bounds=bds3a,
                        tol=1e-7,options={'disp':True,'maxiter':config.least_squares_max_iter})
@@ -436,6 +444,7 @@ def run_malice(config):
     
     mle_full_settings = mle_reduced_settings.copy()
     mle_full_settings['mode'] = 'global+dw'
+    optimizer.mode = 'global+dw'
 
     # Full minimization
     model3b = minimize(optimizer.mle, init3b, args=(mle_full_settings,), method='SLSQP', bounds=bds3b,
