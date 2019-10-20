@@ -151,19 +151,8 @@ def main():
 def make_ouput_dir(directory):
     if not os.path.exists(directory):
         os.makedirs(directory)
-
-def run_malice(config):
-    starttime = time.time()
-    
-    ## Important variables
-    larmor = 500
-    gvs = 7
-    lam = 0.01
-    nh_scale = 0.2  # Start here, update after optimized in phase 1
-    bootstraps = config.bootstraps
-    
-    fname = config.input_file
-    fname_prefix = fname.split('/')[-1].split('.')[0]
+        
+def parse_input(fname, larmor, nh_scale):
     
     input = pd.read_csv(fname)
     mleinput = input.copy()
@@ -176,6 +165,21 @@ def run_malice(config):
         resgrouped['15N'] = [x + np.random.normal()/larmor/nh_scale for x in list(resgrouped['15N'])]
         resgrouped['1H'] = [x + np.random.normal()/larmor for x in list(resgrouped['1H'])]
         resgrouped['intensity'] = [x + np.random.normal()*np.mean(mleinput.intensity)/100 for x in list(resgrouped['intensity'])]
+    
+    return mleinput, resgrouped, residues
+
+def run_malice(config):
+    starttime = time.time()
+    
+    ## Important variables
+    larmor = 500
+    gvs = 7
+    lam = 0.01
+    nh_scale = 0.2  # Start here, update after optimized in phase 1
+    bootstraps = config.bootstraps
+    
+    mleinput, resgrouped, residues = parse_input(config.input_file, larmor, nh_scale)
+    
         
     i_noise_est = np.mean(mleinput.intensity)/10
     
@@ -369,6 +373,8 @@ def run_malice(config):
     yl_csp = [np.min(mleoutput.csp)-0.05*csp_rng, np.max(mleoutput.csp)+0.05*csp_rng]
     int_rng = np.max(mleoutput.intensity)-np.min(mleoutput.intensity)
     yl_int = [np.min(mleoutput.intensity)-0.05*int_rng, np.max(mleoutput.intensity)+0.05*int_rng]
+    
+    fname_prefix = config.input_file.split('/')[-1].split('.')[0]
 
     pdf_name = os.path.join(config.output_dir, fname_prefix + '_MaLICE_fits.pdf')
     with PdfPages(pdf_name) as pdf:
