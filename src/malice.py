@@ -56,6 +56,10 @@ def _parse_args():
     parser.add_argument('--deterministic',
                         action='store_true',
                         help='Whether to use a deterministic seed.')
+    parser.add_argument('--larmor',
+                        type=int,
+                        help="Larmor frequency (MHz) of 1H in the given magnetic field.",
+                        default=500)
     # TODO: validate arguments
     return parser.parse_args()
 
@@ -153,7 +157,6 @@ def make_ouput_dir(directory):
         os.makedirs(directory)
         
 def parse_input(fname, larmor, nh_scale):
-    
     input = pd.read_csv(fname)
     mleinput = input.copy()
     
@@ -172,7 +175,7 @@ def run_malice(config):
     starttime = time.time()
     
     ## Important variables
-    larmor = 500
+    larmor = config.larmor
     gvs = 7
     lam = 0.01
     nh_scale = 0.2  # Start here, update after optimized in phase 1
@@ -180,7 +183,6 @@ def run_malice(config):
     
     mleinput, resgrouped, residues = parse_input(config.input_file, larmor, nh_scale)
     
-        
     i_noise_est = np.mean(mleinput.intensity)/10
     
     optimizer = MaliceOptimizer(larmor=larmor, 
