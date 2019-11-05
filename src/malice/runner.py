@@ -18,7 +18,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 import argparse
 import concurrent.futures
 
-from optimizer import MaliceOptimizer
+from malice.optimizer import MaliceOptimizer
 
 def _parse_args():
     parser = argparse.ArgumentParser()
