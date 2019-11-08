@@ -51,7 +51,7 @@ def _parse_args():
                         default=100)
     parser.add_argument('--output_dir',
                         type=str,
-                        help='Directory to store ouput files. Creates if non-existent.',
+                        help='Directory to store output files. Creates if non-existent.',
                         default="output")
     parser.add_argument('--deterministic',
                         action='store_true',
@@ -147,12 +147,12 @@ def bootstrapper(fx, config, mleinput, model, gvs, bds):
 
 def main():
     args = _parse_args()
-    make_ouput_dir(args.output_dir)
+    make_output_dir(args.output_dir)
     if args.deterministic:
         np.random.seed(seed=1337)
     run_malice(args)
     
-def make_ouput_dir(directory):
+def make_output_dir(directory):
     if not os.path.exists(directory):
         os.makedirs(directory)
         
