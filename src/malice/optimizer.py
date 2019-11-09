@@ -16,28 +16,28 @@ class MaliceOptimizer(object):
     
     def mle(self, params, mleinput):
         if self.mode == 'global+dw':
-            Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise = params[:7]
+            Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise = params[:self.gvs]
             resparams = self.resgrouped.copy().rename(columns={'intensity':'I_ref','15N':'15N_ref','1H':'1H_ref'})
             resparams['dw'] = params[self.gvs:]
         elif self.mode == 'refpeak_opt':
-            Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise = self.model1[:7]
+            Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise = self.model1[:self.gvs]
             resparams = pd.DataFrame({'residue':self.residues,'15N_ref':params[:int(len(params)/3)],
                                       '1H_ref':params[int(len(params)/3):2*int(len(params)/3)],
                                       'I_ref':params[2*int(len(params)/3):],'dw':self.model1[self.gvs:]})
         elif self.mode == 'dw_scale':
-            Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise, scale = params[:8]
+            Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise, scale = params[:self.gvs+1]
             resparams = pd.DataFrame({'residue':self.residues,
                                       '15N_ref':self.model2[:int(len(self.model2)/3)], 
                                       '1H_ref':self.model2[int(len(self.model2)/3):2*int(len(self.model2)/3)],
                                       'I_ref':self.model2[2*int(len(self.model2)/3):]})
             resparams['dw'] = self.model1[self.gvs:]*scale
         elif self.mode == 'final_opt':
-            Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise = params[:7]
+            Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise = params[:self.gvs]
             resparams = pd.DataFrame({'residue':self.residues,
                                       '15N_ref':self.model2[:int(len(self.model2)/3)], 
                                       '1H_ref':self.model2[int(len(self.model2)/3):2*int(len(self.model2)/3)],
                                       'I_ref':self.model2[2*int(len(self.model2)/3):],
-                                      'dw':self.model1[self.gvs:]})
+                                      'dw':params[self.gvs:]})
             
         else:
             print('UNSUPPORTED OPTIMIZATION MODE')

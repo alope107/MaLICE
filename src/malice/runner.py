@@ -165,9 +165,9 @@ def parse_input(fname, larmor, nh_scale):
     for res in residues:
         resdata = mleinput.copy()[mleinput.residue == res]
         resgrouped = resgrouped.append(resdata.loc[resdata.intensity == np.max(resdata.intensity),['residue','15N','1H','intensity']])
-        resgrouped['15N'] = [x + np.random.normal()/larmor/nh_scale for x in list(resgrouped['15N'])]
-        resgrouped['1H'] = [x + np.random.normal()/larmor for x in list(resgrouped['1H'])]
-        resgrouped['intensity'] = [x + np.random.normal()*np.mean(mleinput.intensity)/100 for x in list(resgrouped['intensity'])]
+        #resgrouped['15N'] = [x + np.random.normal()/larmor/nh_scale for x in list(resgrouped['15N'])]
+        #resgrouped['1H'] = [x + np.random.normal()/larmor for x in list(resgrouped['1H'])]
+        #resgrouped['intensity'] = [x + np.random.normal()*np.mean(mleinput.intensity)/100 for x in list(resgrouped['intensity'])]
     
     return mleinput, resgrouped, residues
 
