@@ -1,3 +1,6 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*- 
+
 ### MaLICE v190923-0903
 ### First standalone script version
 
@@ -7,6 +10,7 @@
 ##                            - Need to go back validate this is best
 
 ## Import libraries
+
 import sys, itertools, time, datetime, concurrent, multiprocessing
 import os
 import numpy as np, pandas as pd
@@ -60,8 +64,33 @@ def _parse_args():
                         type=int,
                         help="Larmor frequency (MHz) of 1H in the given magnetic field.",
                         default=500)
+    parser.add_argument('--optimizer',
+                        type=str,
+                        help='SciPy or PyGMO')
     # TODO: validate arguments
     return parser.parse_args()
+
+def gen_pop1(mleinput,residues,larmor):
+    Kd_exp_random = list(np.random.random(1)*5-1)   # Will span from 100 nM to 10 mM
+    kex_exp_random = list(np.random.random(1)*4+3)  # Will span from 1 kHz to 10 Mhz
+    dR2_random = list(np.random.random(1)*200)            # 0 - 200 Hz
+    amp_random = [np.random.normal(np.mean(mleinput.intensity),np.std(mleinput.intensity)) * 20]
+        # random amp logic is that since amp = intensity * lw, lets just randomly sample something from the reasonable intensity
+        # range and multiply by 20, which is probably a decent enough guess of typical protein linewidths
+    nh_scale_random = list(np.random.random(1)*0.25+0.05)   # Random scalar between 0.05 and 0.3
+    i_noise_random = list(np.mean(mleinput.intensity)/(np.random.random(1)*46+4)) # 1/4 to 1/50th of mean intensity
+    cs_noise_random = list(larmor/(np.random.random(1)*4450+50)) # larmor / 50-4500 -- rough range of digital res
+
+    dw_random = list( 0.1*larmor * np.random.random(len(residues)) ) ## Every delta_w is 0-0.1 ppm CSP
+
+    return Kd_exp_random + kex_exp_random + dR2_random + amp_random + nh_scale_random + i_noise_random + cs_noise_random + dw_random
+
+def gen_pop2(resgrouped):
+    N_random = list( np.array(resgrouped['15N']) + np.random.normal(0,model1.x[6]/model1.x[4],len(residues)) )
+    H_random = list( np.array(resgrouped['1H']) + np.random.normal(0,model1.x[6],len(residues)) )  
+    Iref_random = list( np.array(resgrouped['intensity']) + np.random.normal(0,model1.x[3],len(residues)) )
+
+    return N_random + H_random + Iref_random
 
 def model_fitter(df, model3b):
     Kd_exp = model3b.x[0]
@@ -187,11 +216,16 @@ def run_malice(config):
     
     optimizer = MaliceOptimizer(larmor=larmor, 
                                 gvs=gvs, 
-                                lam=lam,  
+                                lam=lam,
+                                mleinput = mleinput,  
                                 resgrouped=resgrouped,
                                 residues=residues, 
                                 mode='global+dw',
                                 cs_dist='gaussian')
+    
+    mininit1 = [-1, 1, 0, np.min(mleinput.intensity)/10, 0.05, i_noise_est/10, larmor/4500] + list([0]*len(residues))
+    maxinit1 = [4, 7, 200, np.max(mleinput.intensity)*200, 0.3, i_noise_est*10, larmor/50] + list([6*larmor]*len(residues))
+    optimizer.set_bounds((mininit1,maxinit1))
 
     ## Perform pop_iter replicates of pop_size member populations
     print('\n---  Round 1: initial global variable and delta w optimization  ---\n')
@@ -214,19 +248,14 @@ def run_malice(config):
 
             pop.append(Kd_exp_random + kex_exp_random + dR2_random + amp_random + nh_scale_random + i_noise_random + cs_noise_random + dw_random)
 
-
-        mininit = [-1, 1, 0, np.min(mleinput.intensity)/10, 0.05, i_noise_est/10, larmor/4500] + list([0]*len(residues))
-        maxinit = [4, 7, 200, np.max(mleinput.intensity)*200, 0.3, i_noise_est*10, larmor/50] + list([6*larmor]*len(residues))
-
-        bds1 = tuple([(mininit[x],maxinit[x]) for x in range(len(mininit))])
         
         ## Run the job
         print('Round 1 - Population # '+str(iteration+1))
         optimizer.i = 0
-        initfit = differential_evolution(optimizer.mle, bds1, args=(mleinput,), init = pop, updating='deferred', 
+        initfit = differential_evolution(optimizer.mle, optimizer.get_scipy_bounds(), init = pop, updating='deferred', 
                                          workers = config.thread_count, mutation=(0.5,1.9),maxiter = config.evo_max_iter, 
                                          strategy = 'best1bin', polish = False, recombination = 0.7, 
-                                         tol=1e-6, disp=False, callback=optimizer.counter_factory(mleinput))
+                                         tol=1e-6, disp=False, callback=optimizer.counter_factory())
         print('\n'+str(round(initfit.fun - lam*np.sum(initfit.x[gvs:]),2))+'\n')
         models1.append(initfit)
 
@@ -237,9 +266,16 @@ def run_malice(config):
     optimizer.model1 = model1.x
     optimizer.residues = residues
     optimizer.mode = 'refpeak_opt'
+    
+    mininit2 =  list(np.array(resgrouped['15N']) - 0.2) + list(
+                     np.array(resgrouped['1H']) - 0.05) + list(np.array(resgrouped.intensity)/10) 
+    maxinit2 =  list(np.array(resgrouped['15N']) + 0.2) + list(
+                     np.array(resgrouped['1H']) + 0.05) + list(np.array(resgrouped.intensity)*10) 
+    optimizer.set_bounds((mininit2,maxinit2))
 
     ## Stage 2 - reference peak optimization
     print('\n---  Round 2: reference peak optimization  ---\n')
+    
     
     ## Set up replicate populations and run
     models2 = []
@@ -251,21 +287,13 @@ def run_malice(config):
             Iref_random = list( np.array(resgrouped['intensity']) + np.random.normal(0,model1.x[3],len(residues)) )
 
             pop.append(N_random + H_random + Iref_random)
-        pop.append( list(resgrouped['15N']) + list(resgrouped['1H']) + list(resgrouped['intensity']) )
-
-        mininit =  list(np.array(resgrouped['15N']) - 0.2) + list(
-                        np.array(resgrouped['1H']) - 0.05) + list(np.array(resgrouped.intensity)/10) 
-        maxinit =  list(np.array(resgrouped['15N']) + 0.2) + list(
-                        np.array(resgrouped['1H']) + 0.05) + list(np.array(resgrouped.intensity)*10) 
-
-        bds2 = tuple([(mininit[x],maxinit[x]) for x in range(len(mininit))])
         
         print('Round 2 - Population #'+str(z+1))
         optimizer.i = 0
-        ref_opt = differential_evolution(optimizer.mle, bds2, args=(mleinput,), init = pop, updating='deferred', 
+        ref_opt = differential_evolution(optimizer.mle, optimizer.get_scipy_bounds(), init = pop, updating='deferred', 
                                          workers = config.thread_count, mutation=(0.5,1.9), maxiter = config.evo_max_iter, 
                                          strategy = 'best1bin', polish = False, recombination = 0.7,
-                                         tol=1e-7, disp=False, callback=optimizer.counter_factory(mleinput))
+                                         tol=1e-7, disp=False, callback=optimizer.counter_factory())
         print('\n'+str(round(ref_opt.fun,2))+'\n')
         models2.append(ref_opt)
 
@@ -274,56 +302,52 @@ def run_malice(config):
     model2 = models2[0]
 
     ## Polish the reference peaks
-    model2opt = minimize(optimizer.mle, model2.x, args=(mleinput,), method='SLSQP',bounds=bds2,
+    model2opt = minimize(optimizer.mle, model2.x, method='SLSQP',bounds=optimizer.get_scipy_bounds(),
                          tol=1e-7, options={'disp':True,'maxiter': config.least_squares_max_iter})
 
     ## Stage 3 - polish off the model with gradient minimization
     print('\n---  Round 3: gradient minimization of global variables and delta w  ---\n')
     
     ## Run the 3a scaling optimization
-    # Bounds
-    mininit = [model1.x[0]-1, model1.x[1]-1, model1.x[2]-20, model1.x[3]/4, 
-               model1.x[4]/1.5, model1.x[5]/4, model1.x[6]/4, 0.1]
-    maxinit = [model1.x[0]+1, model1.x[1]+1, model1.x[2]+20, model1.x[3]*4, 
-               model1.x[4]*1.5, model1.x[5]*4, model1.x[6]*4, 10]
-
-    # Fix any of the global bounds that go off into stupid places
-    for i in range(gvs):
-        if mininit[i] < bds1[i][0]:    mininit[i] = bds1[i][0]
-        if maxinit[i] > bds1[i][1]:    maxinit[i] = bds1[i][1]
-
-    bds3a = tuple([(mininit[x],maxinit[x]) for x in range(len(mininit))])
-
-    init3a = list(model1.x[:gvs]) + [1]
     
     optimizer.model2 = model2opt.x
     optimizer.lam=0
     optimizer.mode = 'dw_scale'
+    
+    # Bounds
+    mininit3a = [model1.x[0]-1, model1.x[1]-1, model1.x[2]-20, model1.x[3]/4, 
+               model1.x[4]/1.5, model1.x[5]/4, model1.x[6]/4, 0.1]
+    maxinit3a = [model1.x[0]+1, model1.x[1]+1, model1.x[2]+20, model1.x[3]*4, 
+               model1.x[4]*1.5, model1.x[5]*4, model1.x[6]*4, 10]
+    # Fix any of the global bounds that go off into stupid places
+    for i in range(gvs):
+        if mininit3a[i] < mininit1[i]:    mininit3a[i] = mininit1[i]
+        if maxinit3a[i] > maxinit1[i]:    maxinit3a[i] = maxinit1[i]
+    optimizer.set_bounds((mininit3a,maxinit3a))
 
-    model3a = minimize(optimizer.mle, init3a, args=(mleinput,), method='SLSQP',bounds=bds3a,
+    init3a = list(model1.x[:gvs]) + [1]
+
+    model3a = minimize(optimizer.mle, init3a, method='SLSQP',bounds=optimizer.get_scipy_bounds(),
                        tol=1e-7,options={'disp':True,'maxiter':config.least_squares_max_iter})
 
 
     ## Run the 3b fine tuning optimization
+    optimizer.mode = 'final_opt'
     # Bounds
-    mininit = [model3a.x[0]-0.2, model3a.x[1]-0.2, model3a.x[2]-10, model3a.x[3]/1.2,
-               model3a.x[4]/1.2, model3a.x[5]/1.2, model3a.x[6]/1.2] + [0]*len(residues)
-    maxinit = [model3a.x[0]+0.2, model3a.x[1]+0.2, model3a.x[2]+10, model3a.x[3]*1.2,
-               model3a.x[4]*1.2, model3a.x[5]*1.2, model3a.x[6]*1.2] + list(np.array(model1.x[gvs:])*model3a.x[-1]*2)
-
+    mininit3b = [model3a.x[0]-0.2, model3a.x[1]-0.2, model3a.x[2]-10, model3a.x[3]/1.2,
+                 model3a.x[4]/1.2, model3a.x[5]/1.2, model3a.x[6]/1.2] + [0]*len(residues)
+    maxinit3b = [model3a.x[0]+0.2, model3a.x[1]+0.2, model3a.x[2]+10, model3a.x[3]*1.2,
+                 model3a.x[4]*1.2, model3a.x[5]*1.2, model3a.x[6]*1.2] + list(np.array(model1.x[gvs:])*model3a.x[-1]*2)
     # Fix any of the global bounds that go off into stupid places
     for i in range(gvs):
-        if mininit[i] < bds1[i][0]:    mininit[i] = bds1[i][0]
-        if maxinit[i] > bds1[i][1]:    maxinit[i] = bds1[i][1]
-
-    bds3b = tuple([(mininit[x],maxinit[x]) for x in range(len(mininit))])
+        if mininit3b[i] < mininit1[i]:    mininit3b[i] = mininit1[i]
+        if maxinit3b[i] > maxinit1[i]:    maxinit3b[i] = maxinit1[i]
+    optimizer.set_bounds((mininit3b,maxinit3b))
 
     init3b = list(model3a.x[:gvs]) + list(np.array(model1.x[gvs:])*model3a.x[-1])
     
-    optimizer.mode = 'final_opt'
-
     # Full minimization
-    model3b = minimize(optimizer.mle, init3b, args=(mleinput,), method='SLSQP', bounds=bds3b,
+    model3b = minimize(optimizer.mle, init3b, method='SLSQP', bounds=optimizer.get_scipy_bounds(),
                       tol=1e-7, options={'disp':True,'maxiter':config.least_squares_max_iter})
 
     print('\nFinal Score = '+str(round(model3b.fun,2)))
@@ -396,6 +420,8 @@ def run_malice(config):
 
 
     ## Perform likelihood ratio tests
+    ##### DISABLE ALL OF THESE FOR THE TIME BEING -- NEEDS TO BE REWRITTEN
+    '''
     print('\n---  Round 4: likelihood ratio test of parameters  ---\n')
     executor = concurrent.futures.ProcessPoolExecutor(config.thread_count)
     futures = [executor.submit(null_calculator, optimizer.mle, config, mleinput, model3b.x, dfs, gvs, bds1, r) for r in residues]
@@ -423,17 +449,17 @@ def run_malice(config):
         print(global_params[k]+' = '+str(round(model3b.x[k],2))+' +/- '+str(round(np.std(bs_results),2)))
     
     dfs['stderr'] = [np.std([x.result().x[gvs+r] for x in futures]) for r in range(len(residues))]
-    
+
     
     png_name = os.path.join(config.output_dir, fname_prefix + '_MaLICE_plot.png')
     fig, ax = plt.subplots(figsize=(12,8))
     ax.scatter('residue','dw',data=dfs[dfs.sig == False],color='black',s=80)
-    ax.errorbar('residue','dw',yerr='stderr',data=dfs[dfs.sig == False],color='black',fmt='none',s=20)
+    #ax.errorbar('residue','dw',yerr='stderr',data=dfs[dfs.sig == False],color='black',fmt='none',s=20)
     ax.scatter('residue','dw',data=dfs[dfs.sig == True],color='red',s=80)
-    ax.errorbar('residue','dw',yerr='stderr',data=dfs[dfs.sig == True],color='red',fmt='none',s=20)
+    #ax.errorbar('residue','dw',yerr='stderr',data=dfs[dfs.sig == True],color='red',fmt='none',s=20)
     ax.set(xlim=(np.min(dfs.residue)+1,np.max(dfs.residue)+1),xlabel='Residue',ylabel='Δω (Hz)')
     fig.savefig(png_name,dpi=600,bbox_inches='tight',pad_inches=0)
-
+    '''
     ## Print out data
     csv_name = os.path.join(config.output_dir, fname_prefix + '_MaLICE_fits.csv')
     txt_name = os.path.join(config.output_dir, fname_prefix+'_MaLICE_deltaw.txt')

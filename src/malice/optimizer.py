@@ -4,17 +4,27 @@ import scipy.stats as stats
 
 class MaliceOptimizer(object):
 
-    def __init__(self, larmor=500,gvs=7,lam=.01,cs_dist='gaussian',resgrouped=None,residues=None,mode=None):
+    def __init__(self, larmor=500,gvs=7,lam=.01,cs_dist='gaussian',mleinput=None,resgrouped=None,residues=None,mode=None):
         self.larmor = larmor
         self.gvs = gvs
         self.lam = lam
+        self.mleinput = mleinput
         self.resgrouped = resgrouped
         self.residues = residues
         self.mode = mode
         self.cs_dist = cs_dist
         self.i = 0
     
-    def mle(self, params, mleinput):
+    def set_bounds(self, bds):
+        self.bounds = bds
+        
+    def get_bounds(self):
+        return self.bounds
+    
+    def get_scipy_bounds(self):
+        return tuple([(self.bounds[0][x],self.bounds[1][x]) for x in range(len(self.bounds[0]))])
+    
+    def mle(self, params):
         if self.mode == 'global+dw':
             Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise = params[:self.gvs]
             resparams = self.resgrouped.copy().rename(columns={'intensity':'I_ref','15N':'15N_ref','1H':'1H_ref'})
@@ -43,7 +53,7 @@ class MaliceOptimizer(object):
             print('UNSUPPORTED OPTIMIZATION MODE')
             return 0
         
-        df = pd.merge(mleinput,resparams,on='residue')
+        df = pd.merge(self.mleinput,resparams,on='residue')
         
         Kd = np.power(10,Kd_exp)
         koff = np.power(10,koff_exp)
@@ -83,13 +93,13 @@ class MaliceOptimizer(object):
         
         return(negLL)
 
-    def counter_factory(self, mleinput):
+    def counter_factory(self):
 
         if self.mode == 'global+dw':
             def counter(xk, convergence=1e-7):
                 if self.i%1000 == 0:
-                    print(str(self.i).ljust(8)+'Score: '+str(round(self.mle(xk, mleinput),2)).ljust(12)+
-                          '-logL: '+str(round(self.mle(xk, mleinput)-self.lam*np.sum(xk[self.gvs:]),2)).ljust(12)+
+                    print(str(self.i).ljust(8)+'Score: '+str(round(self.mle(xk),2)).ljust(12)+
+                          '-logL: '+str(round(self.mle(xk)-self.lam*np.sum(xk[self.gvs:]),2)).ljust(12)+
                           'Kd: '+str(round(np.power(10,xk[0]),1)).ljust(10)+
                           'dR2: '+str(round(xk[2],2)).ljust(8)+
                           'max_dw: '+str(round(np.max(xk[self.gvs:]),2)))
@@ -98,7 +108,7 @@ class MaliceOptimizer(object):
         elif self.mode == 'refpeak_opt':
             def counter(xk,convergence=1e-7):
                 if self.i%1000 == 0:
-                    print(str(self.i).ljust(8)+'-logL: '+str(round(self.mle(xk, mleinput),2)).ljust(12))
+                    print(str(self.i).ljust(8)+'-logL: '+str(round(self.mle(xk),2)).ljust(12))
                 self.i+=1
             return counter
         else:
