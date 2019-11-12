@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*- 
-
 ### MaLICE v190923-0903
 ### First standalone script version
 
