@@ -60,6 +60,11 @@ def _parse_args():
                         type=int,
                         help="Larmor frequency (MHz) of 1H in the given magnetic field.",
                         default=500)
+    #TODO: find a better place for this
+    parser.add_argument('--s3_prefix',
+                        type=str,
+                        help='S3 bucket and key prefix to upload zip to. Do not include trailing "/"',
+                        default=None)
     # TODO: validate arguments
     return parser.parse_args()
 

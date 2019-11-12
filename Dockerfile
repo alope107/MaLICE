@@ -11,5 +11,15 @@ ENV PYTHONPATH=/app/src
 COPY . /app
 WORKDIR /app
 
-ENTRYPOINT ["python", "src/malice/runner.py"]
-CMD ["data/dev.csv", "--pop_size", "5", "--pop_iter", "1", "--evo_max_iter", "10", "--least_squares_max_iter", "1", "--thread_count", "1", "--bootstraps", "2", "--deterministic"]
+ENTRYPOINT ["python", "src/run_and_upload.py"]
+
+CMD ["data/dev.csv",                    \
+     "--pop_size", "5",                 \
+     "--pop_iter", "1",                 \
+     "--evo_max_iter", "10",            \
+     "--least_squares_max_iter", "1",   \
+     "--thread_count", "1",             \
+     "--bootstraps", "2",               \
+     "--s3_prefix", "malice/test",      \
+     "--output_dir", "default",         \
+     "--deterministic"]
