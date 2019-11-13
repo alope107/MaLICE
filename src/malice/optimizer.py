@@ -14,6 +14,7 @@ class MaliceOptimizer(object):
         self.mode = mode
         self.cs_dist = cs_dist
         self.i = 0
+        self.pygmo = False
     
     def set_bounds(self, bds):
         self.bounds = bds
@@ -24,7 +25,7 @@ class MaliceOptimizer(object):
     def get_scipy_bounds(self):
         return tuple([(self.bounds[0][x],self.bounds[1][x]) for x in range(len(self.bounds[0]))])
     
-    def mle(self, params):
+    def fitness(self, params):
         if self.mode == 'global+dw':
             Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise = params[:self.gvs]
             resparams = self.resgrouped.copy().rename(columns={'intensity':'I_ref','15N':'15N_ref','1H':'1H_ref'})
@@ -91,15 +92,16 @@ class MaliceOptimizer(object):
         
         negLL = -1*(logLL_int + logLL_cs - self.lam*np.sum(np.abs(df.dw)))
         
-        return(negLL)
+        if self.pygmo:  return(negLL, )
+        else:   return(negLL)
 
     def counter_factory(self):
 
         if self.mode == 'global+dw':
             def counter(xk, convergence=1e-7):
                 if self.i%1000 == 0:
-                    print(str(self.i).ljust(8)+'Score: '+str(round(self.mle(xk),2)).ljust(12)+
-                          '-logL: '+str(round(self.mle(xk)-self.lam*np.sum(xk[self.gvs:]),2)).ljust(12)+
+                    print(str(self.i).ljust(8)+'Score: '+str(round(self.fitness(xk),2)).ljust(12)+
+                          '-logL: '+str(round(self.fitness(xk)-self.lam*np.sum(xk[self.gvs:]),2)).ljust(12)+
                           'Kd: '+str(round(np.power(10,xk[0]),1)).ljust(10)+
                           'dR2: '+str(round(xk[2],2)).ljust(8)+
                           'max_dw: '+str(round(np.max(xk[self.gvs:]),2)))
@@ -108,7 +110,7 @@ class MaliceOptimizer(object):
         elif self.mode == 'refpeak_opt':
             def counter(xk,convergence=1e-7):
                 if self.i%1000 == 0:
-                    print(str(self.i).ljust(8)+'-logL: '+str(round(self.mle(xk),2)).ljust(12))
+                    print(str(self.i).ljust(8)+'-logL: '+str(round(self.fitness(xk),2)).ljust(12))
                 self.i+=1
             return counter
         else:
