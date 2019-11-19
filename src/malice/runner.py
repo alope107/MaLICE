@@ -27,13 +27,17 @@ def _parse_args():
     parser.add_argument('input_file', 
                         type=str, 
                         help='path to the CSV to import')
-    parser.add_argument("--pop_iter", 
+    parser.add_argument("--phase1_iter", 
                         type=int,
-                        help='Number of populations to perform the differential evolution on',
+                        help='Number of populations to perform the differential evolution on in phase 1',
                         default=10)
+    parser.add_argument("--phase2_iter", 
+                        type=int,
+                        help='Number of populations to perform the differential evolution on in phase 2',
+                        default=4)
     parser.add_argument('--pop_size', 
                         type=int,
-                        help='Number of populations to perform differential evolution on',
+                        help='Population size to perform differential evolution on',
                         default=20)
     parser.add_argument('--evo_max_iter',  #TODO: Different maxes for different phases?
                         type=int,
@@ -90,40 +94,6 @@ def gen_pop2(optimizer,resgrouped,residues):
 
     return N_random + H_random + Iref_random
 
-def model_fitter(df, model3b):
-    Kd_exp = model3b.x[0]
-    koff_exp = model3b.x[1]
-    C = model3b.x[2]
-    i_noise = model3b.x[3]
-    cs_noise = model3b.x[4]
-    amp = model3b.x[5]
-    
-    Kd = np.power(10,Kd_exp)
-    koff = np.power(10,koff_exp)
-    kon = koff/Kd
-    
-    dimer = ( (df.obs + df.tit + Kd) - np.sqrt( np.power((df.obs + df.tit + Kd),2) - 4*df.obs*df.tit ) )/2
-    pb = dimer/df.obs
-    pa = 1 - pb
-    
-    #Assume 1:1 stoichiometry for now
-    free_tit = df.tit - dimer
-    kr = koff
-    kf = free_tit*kon
-    kex = kr + kf
-    
-    broad_denom = np.square(np.square(kex) + (1-5*pa*pb)*np.square(df.dw)) + 4*pa*pb*(1-4*pa*pb)*np.power(df.dw,4)
-    
-    #Calculate intensity likelihood
-    i_broad = pa*pb*np.square(df.dw)*kex * (np.square(kex)+(1-5*pa*pb)*np.square(df.dw))/broad_denom
-    #ihat = df.I_ref/(pa + pb*C + i_broad/lw)
-    df['ihat'] = df.I_ref/( pa + pb + df.I_ref*(pb*C + i_broad)/amp )
-    
-    #Calculate cs likelihood
-    cs_broad = pa*pb*(pa-pb)*np.power(df.dw,3) * (np.square(kex)+(1-3*pa*pb)*np.square(df.dw))/broad_denom
-    df['cshat'] = pb*df.dw - cs_broad
-    
-    return df
 
 def null_calculator(fx, config, mleinput, model, df, gvs, bds, res):
     dfx = df.copy()
@@ -135,8 +105,8 @@ def null_calculator(fx, config, mleinput, model, df, gvs, bds, res):
                model[4]*1.2, model[5]*1.2, model[6]*1.2] + list(dfx.dw*2)
     
     for i in range(gvs):
-        if mininit[i] < bds[i][0]:	mininit[i] = bds[i][0]
-        if maxinit[i] > bds[i][1]:	maxinit[i] = bds[i][1]
+        if mininit[i] < bds[i][0]:    mininit[i] = bds[i][0]
+        if maxinit[i] > bds[i][1]:    maxinit[i] = bds[i][1]
     
     bdsx = tuple([(mininit[x],maxinit[x]) for x in range(len(mininit))])
     
@@ -159,8 +129,8 @@ def bootstrapper(fx, config, mleinput, model, gvs, bds):
                model[4]*1.2, model[5]*1.2, model[6]*1.2] + list(model[gvs:]*2)
     
     for i in range(gvs):
-        if mininit[i] < bds[i][0]:	mininit[i] = bds[i][0]
-        if maxinit[i] > bds[i][1]:	maxinit[i] = bds[i][1]
+        if mininit[i] < bds[i][0]:    mininit[i] = bds[i][0]
+        if maxinit[i] > bds[i][1]:    maxinit[i] = bds[i][1]
     
     bdsx = tuple([(mininit[x],maxinit[x]) for x in range(len(mininit))])
     
@@ -201,6 +171,8 @@ def parse_input(fname, larmor, nh_scale):
 def run_malice(config):
     starttime = time.time()
     
+    fname_prefix = config.input_file.split('/')[-1].split('.')[0]
+    
     ## Important variables
     larmor = config.larmor
     gvs = 7
@@ -225,16 +197,15 @@ def run_malice(config):
     maxinit1 = [4, 7, 200, np.max(mleinput.intensity)*200, 0.3, i_noise_est*10, larmor/50] + list([6*larmor]*len(residues))
     optimizer.set_bounds((mininit1,maxinit1))
 
-    ## Perform pop_iter replicates of pop_size member populations
     print('\n---  Round 1: initial global variable and delta w optimization  ---\n')
     
     if config.pygmo:
         optimizer.pygmo = True
         archi = pg.archipelago(prob = pg.problem(optimizer))
-        for iteration in range(config.pop_iter):
+        for iteration in range(config.phase1_iter):
             pop = pg.population(pg.problem(optimizer))
             for x in range(config.pop_size):    pop.push_back( gen_pop1(mleinput,residues,larmor) )
-            archi.push_back(pop = pop, algo = pg.de(gen=config.evo_max_iter))
+            archi.push_back(pop = pop, algo = pg.de(gen=config.evo_max_iter,variant=6,CR=0.7,ftol=1e-3))
         archi.evolve()
         archi.wait()
         best_score = np.array(archi.get_champions_f()).min()
@@ -244,7 +215,7 @@ def run_malice(config):
     else:
         optimizer.pygmo = False
         models1 = []
-        for iteration in range(config.pop_iter):
+        for iteration in range(config.phase1_iter):
             ## Let's define a new starting population every time to try to introduce more coverage of the space
             pop = []
             for x in range(config.pop_size):    pop.append(gen_pop1(mleinput,residues,larmor))
@@ -265,7 +236,6 @@ def run_malice(config):
         
     optimizer.residues = residues
     optimizer.mode = 'refpeak_opt'
-    optimizer.pygmo = False
     
     mininit2 =  list(np.array(resgrouped['15N']) - 0.2) + list(
                      np.array(resgrouped['1H']) - 0.05) + list(np.array(resgrouped.intensity)/10) 
@@ -278,27 +248,45 @@ def run_malice(config):
     
     
     ## Set up replicate populations and run
-    models2 = []
-    for z in range(config.pop_iter):
-        pop = []
-        for x in range(config.pop_size):    pop.append(gen_pop2(optimizer,resgrouped,residues))
+    if config.pygmo:
+        optimizer.pygmo = True
+        archi = pg.archipelago(prob = pg.problem(optimizer))
+        for iteration in range(config.phase2_iter):
+            pop = pg.population(pg.problem(optimizer))
+            for x in range(config.pop_size):    pop.push_back( gen_pop2(optimizer,resgrouped,residues) )
+            archi.push_back(pop = pop, algo = pg.de(gen=config.evo_max_iter,variant=6,CR=0.7,ftol=1e-3))
+        archi.evolve()
+        archi.wait()
+        best_score = np.array(archi.get_champions_f()).min()
+        best_index = archi.get_champions_f().index(best_score)
+        model2 = archi.get_champions_x()[best_index]
         
-        print('Round 2 - Population #'+str(z+1))
-        optimizer.i = 0
-        ref_opt = differential_evolution(optimizer.fitness, optimizer.get_scipy_bounds(), init = pop, updating='deferred', 
-                                         workers = config.thread_count, mutation=(0.5,1.9), maxiter = config.evo_max_iter, 
-                                         strategy = 'best1bin', polish = False, recombination = 0.7,
-                                         tol=1e-7, disp=False, callback=optimizer.counter_factory())
-        print('\n'+str(round(ref_opt.fun,2))+'\n')
-        models2.append(ref_opt)
+        ## Polish the reference peaks
+        model2opt = minimize(optimizer.fitness, model2, method='SLSQP',bounds=optimizer.get_scipy_bounds(),
+                             tol=1e-7, options={'disp':True,'maxiter': config.least_squares_max_iter})
+    else:
+        optimizer.pygmo = False
+        models2 = []
+        for z in range(config.phase2_iter):
+            pop = []
+            for x in range(config.pop_size):    pop.append(gen_pop2(optimizer,resgrouped,residues))
+            
+            print('Round 2 - Population #'+str(z+1))
+            optimizer.i = 0
+            ref_opt = differential_evolution(optimizer.fitness, optimizer.get_scipy_bounds(), init = pop, updating='deferred', 
+                                             workers = config.thread_count, mutation=(0.5,1.9), maxiter = config.evo_max_iter, 
+                                             strategy = 'best1bin', polish = False, recombination = 0.7,
+                                             tol=1e-7, disp=False, callback=optimizer.counter_factory())
+            print('\n'+str(round(ref_opt.fun,2))+'\n')
+            models2.append(ref_opt)
 
-    ## Sort the results by -logL and use the best one for final polishing
-    models2.sort(key=lambda y:y.fun)
-    model2 = models2[0]
+        ## Sort the results by -logL and use the best one for final polishing
+        models2.sort(key=lambda y:y.fun)
+        model2 = models2[0]
 
-    ## Polish the reference peaks
-    model2opt = minimize(optimizer.fitness, model2.x, method='SLSQP',bounds=optimizer.get_scipy_bounds(),
-                         tol=1e-7, options={'disp':True,'maxiter': config.least_squares_max_iter})
+        ## Polish the reference peaks
+        model2opt = minimize(optimizer.fitness, model2.x, method='SLSQP',bounds=optimizer.get_scipy_bounds(),
+                             tol=1e-7, options={'disp':True,'maxiter': config.least_squares_max_iter})
 
     ## Stage 3 - polish off the model with gradient minimization
     print('\n---  Round 3: gradient minimization of global variables and delta w  ---\n')
@@ -346,7 +334,8 @@ def run_malice(config):
                       tol=1e-7, options={'disp':True,'maxiter':config.least_squares_max_iter})
 
     print('\nFinal Score = '+str(round(model3b.fun,2)))
-
+    
+    optimizer.model3 = model3b.x
 
     ## Let's go ahead and print some results + save a figure
     print('\n\tKd = '+str(round(np.power(10,model3b.x[0]),2))+
@@ -358,55 +347,37 @@ def run_malice(config):
           '\n\tCSnoise = '+str(round(model3b.x[6],2)))
 
     dfs = pd.DataFrame({'residue':residues,'dw':model3b.x[gvs:]})
+    ## Print out data
+    csv_name = os.path.join(config.output_dir, fname_prefix + '_MaLICE_fits.csv')
+    txt_name = os.path.join(config.output_dir, fname_prefix+'_MaLICE_deltaw.txt')
+    dfs.to_csv(csv_name,index=False)
+    dfs[['residue','dw']].to_csv(txt_name, index=False,header=False)
+    
 
     ## Output the per-residue fits
-    concs = mleinput[['tit','obs']].drop_duplicates()
-    tit_obs_lm = stats.linregress(concs.tit,concs.obs)
-
-    tit_rng = np.max(concs.tit) - np.min(concs.tit)
-    tit_vals = np.linspace(np.min(concs.tit)-0.1*tit_rng,
-                           np.max(concs.tit)+0.1*tit_rng,
-                           1000)
-    obs_vals = tit_obs_lm.slope*tit_vals + tit_obs_lm.intercept
-
-    fitter_input = pd.DataFrame({'tit':tit_vals,'obs':obs_vals})
-    res_df = pd.DataFrame(itertools.product(tit_vals,residues),
-                          columns=['tit','residue'])
-    fitter_input = pd.merge(fitter_input,res_df,on='tit')
-
-    resparams = pd.DataFrame({'residue':residues,
-                              '15N_ref':model2opt.x[:int(len(model2opt.x)/3)], 
-                              '1H_ref':model2opt.x[int(len(model2opt.x)/3):2*int(len(model2opt.x)/3)],
-                              'I_ref':model2opt.x[2*int(len(model2opt.x)/3):],
-                              'dw':model3b.x[gvs:]})
-    fitter_input = pd.merge(fitter_input,resparams,on='residue')
     
-    fit_data = model_fitter(fitter_input, model3b)
-    mleoutput = pd.merge(mleinput,resparams,on='residue')
-    mleoutput['csp'] = larmor*(
-                        np.sqrt( 
-                            np.square(model3b.x[4]*(mleoutput['15N'] - mleoutput['15N_ref'])) + 
-                            np.square(mleoutput['1H'] - mleoutput['1H_ref']) ))
-
-
-    xl = [np.min(concs.tit)-0.01*tit_rng, np.max(concs.tit)+0.01*tit_rng]
+    optimizer.mode = 'lfitter'
+    fit_data = optimizer.fitness()
+    optimizer.mode = 'pfitter'
+    mleoutput = optimizer.fitness()
+    
+    tit_rng = fit_data.tit.max()-fit_data.tit.min()
+    xl = [np.min(fit_data.tit)-0.01*tit_rng, np.max(fit_data.tit)+0.01*tit_rng]
     csp_rng = np.max(mleoutput.csp)-np.min(mleoutput.csp)
     yl_csp = [np.min(mleoutput.csp)-0.05*csp_rng, np.max(mleoutput.csp)+0.05*csp_rng]
     int_rng = np.max(mleoutput.intensity)-np.min(mleoutput.intensity)
     yl_int = [np.min(mleoutput.intensity)-0.05*int_rng, np.max(mleoutput.intensity)+0.05*int_rng]
-    
-    fname_prefix = config.input_file.split('/')[-1].split('.')[0]
 
     pdf_name = os.path.join(config.output_dir, fname_prefix + '_MaLICE_fits.pdf')
     with PdfPages(pdf_name) as pdf:
         for residue in residues:
             fig, ax = plt.subplots(ncols=2,figsize=(7.5,2.5))
             ax[0].scatter('tit','csp',data=mleoutput[mleoutput.residue == residue],color='black',s=10)
-            ax[0].errorbar('tit','csp',data=mleoutput[mleoutput.residue == residue],yerr=model3b.x[4],color='black',fmt='none',s=16)
-            ax[0].plot('tit','cshat',data=fit_data[fit_data.residue == residue])
+            ax[0].errorbar('tit','csp',data=mleoutput[mleoutput.residue == residue],yerr=model3b.x[6],color='black',fmt='none',s=16)
+            ax[0].plot('tit','csfit',data=fit_data[fit_data.residue == residue])
             ax[1].scatter('tit','intensity',data=mleoutput[mleoutput.residue == residue],color='black',s=10)
-            ax[1].errorbar('tit','intensity',data=mleoutput[mleoutput.residue == residue],yerr=model3b.x[3],color='black',fmt='none',s=16)
-            ax[1].plot('tit','ihat',data=fit_data[fit_data.residue == residue])
+            ax[1].errorbar('tit','intensity',data=mleoutput[mleoutput.residue == residue],yerr=model3b.x[5],color='black',fmt='none',s=16)
+            ax[1].plot('tit','ifit',data=fit_data[fit_data.residue == residue])
             ax[0].set(xlim=xl, ylim=yl_csp, xlabel='Titrant (μM)', ylabel='CSP (Hz)', title='Residue '+str(residue)+' CSP')
             ax[1].set(xlim=xl, ylim=yl_int, xlabel='Titrant (μM)', ylabel='Intensity', title='Residue '+str(residue)+' Intensity')
             fig.tight_layout()
@@ -455,11 +426,7 @@ def run_malice(config):
     ax.set(xlim=(np.min(dfs.residue)+1,np.max(dfs.residue)+1),xlabel='Residue',ylabel='Δω (Hz)')
     fig.savefig(png_name,dpi=600,bbox_inches='tight',pad_inches=0)
     '''
-    ## Print out data
-    csv_name = os.path.join(config.output_dir, fname_prefix + '_MaLICE_fits.csv')
-    txt_name = os.path.join(config.output_dir, fname_prefix+'_MaLICE_deltaw.txt')
-    dfs.to_csv(csv_name,index=False)
-    dfs[['residue','dw']].to_csv(txt_name, index=False,header=False)
+
 
     endtime = time.time()
     runtime = endtime-starttime

@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import scipy.stats as stats
+import itertools
 
 class MaliceOptimizer(object):
 
@@ -25,7 +26,7 @@ class MaliceOptimizer(object):
     def get_scipy_bounds(self):
         return tuple([(self.bounds[0][x],self.bounds[1][x]) for x in range(len(self.bounds[0]))])
     
-    def fitness(self, params):
+    def fitness(self, params=None):
         if self.mode == 'global+dw':
             Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise = params[:self.gvs]
             resparams = self.resgrouped.copy().rename(columns={'intensity':'I_ref','15N':'15N_ref','1H':'1H_ref'})
@@ -49,12 +50,36 @@ class MaliceOptimizer(object):
                                       '1H_ref':self.model2[int(len(self.model2)/3):2*int(len(self.model2)/3)],
                                       'I_ref':self.model2[2*int(len(self.model2)/3):],
                                       'dw':params[self.gvs:]})
+        elif self.mode in ['pfitter','lfitter']:
+            ## Output the per-residue fits
+            Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise = self.model3[:self.gvs]
             
+            concs = self.mleinput[['tit','obs']].drop_duplicates()
+            tit_obs_lm = stats.linregress(concs.tit,concs.obs)
+
+            tit_rng = np.max(concs.tit) - np.min(concs.tit)
+            tit_vals = np.linspace(np.min(concs.tit)-0.1*tit_rng,
+                                   np.max(concs.tit)+0.1*tit_rng,
+                                   1000)
+            obs_vals = tit_obs_lm.slope*tit_vals + tit_obs_lm.intercept
+
+            fitter_input = pd.DataFrame({'tit':tit_vals,'obs':obs_vals})
+            res_df = pd.DataFrame(itertools.product(tit_vals,self.residues),
+                                  columns=['tit','residue'])
+            fitter_input = pd.merge(fitter_input,res_df,on='tit')
+
+            resparams = pd.DataFrame({'residue':self.residues,
+                                      '15N_ref':self.model2[:int(len(self.model2)/3)], 
+                                      '1H_ref':self.model2[int(len(self.model2)/3):2*int(len(self.model2)/3)],
+                                      'I_ref':self.model2[2*int(len(self.model2)/3):],
+                                      'dw':self.model3[self.gvs:]})
+
         else:
             print('UNSUPPORTED OPTIMIZATION MODE')
             return 0
         
-        df = pd.merge(self.mleinput,resparams,on='residue')
+        if self.mode == 'lfitter':   df = pd.merge(fitter_input, resparams,on='residue')
+        else:   df = pd.merge(self.mleinput,resparams,on='residue')
         
         Kd = np.power(10,Kd_exp)
         koff = np.power(10,koff_exp)
@@ -72,15 +97,28 @@ class MaliceOptimizer(object):
         
         broad_denom = np.square(np.square(kex) + (1-5*pa*pb)*np.square(df.dw)) + 4*pa*pb*(1-4*pa*pb)*np.power(df.dw,4)
         
-        #Calculate intensity likelihood
+        #Compute the fits
         i_broad = pa*pb*np.square(df.dw)*kex * (np.square(kex)+(1-5*pa*pb)*np.square(df.dw))/broad_denom
         ihat = df.I_ref/( pa + pb + df.I_ref*(pb*dR2 + i_broad)/amp )
-        logLL_int = np.sum( stats.norm.logpdf(df.intensity, loc=ihat, scale=i_noise) )
-        
-        #Calculate cs likelihood
         cs_broad = pa*pb*(pa-pb)*np.power(df.dw,3) * (np.square(kex)+(1-3*pa*pb)*np.square(df.dw))/broad_denom
         cshat = pb*df.dw - cs_broad
+        
+        if self.mode == 'lfitter':
+            df['ifit'] = ihat
+            df['csfit'] = cshat
+            return df
+            
         csobs = self.larmor*(np.sqrt( np.square(nh_scale*(df['15N'] - df['15N_ref'])) + np.square(df['1H'] - df['1H_ref']) ))
+        
+        if self.mode == 'pfitter':
+            df['csp'] = csobs
+            df['ifit'] = ihat
+            df['csfit'] = cshat
+            return df
+    
+        
+        #Compute the likelihoods
+        logLL_int = np.sum( stats.norm.logpdf(df.intensity, loc=ihat, scale=i_noise) )
         
         if self.cs_dist == 'gaussian':
             logLL_cs = np.sum( stats.norm.logpdf(csobs, loc=cshat, scale=cs_noise) )
