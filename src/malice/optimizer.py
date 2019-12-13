@@ -133,6 +133,12 @@ class MaliceOptimizer(object):
         if self.pygmo:  return(negLL, )
         else:   return(negLL)
 
+    def derivative(self, ):
+        ## Return the derivative for each variable in the 
+        return 0
+
+
+
     def counter_factory(self):
 
         if self.mode == 'global+dw':
