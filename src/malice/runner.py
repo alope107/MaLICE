@@ -69,6 +69,22 @@ def _parse_args():
     parser.add_argument('--pygmo',
                         action='store_true',
                         help='Use PyGMO instead of SciPy')
+    parser.add_argument('--tolerance',
+                        type=float,
+                        help='PyGMO tolerance for both ftol and xtol',
+                        default='1e-7')
+    parser.add_argument('--pygmo_evo_iter',
+                        type=int,
+                        help='PyGMO evo iterations',
+                        default=500)
+    parser.add_argument('--pygmo_evo_cycles_1',
+                        type=int,
+                        help='PyGMO evo cycles in phase 1',
+                        default=10)
+    parser.add_argument('--pygmo_evo_cycles_2',
+                        type=int,
+                        help='PyGMO evo cycles in phase 2',
+                        default=5)
     # TODO: validate arguments
     return parser.parse_args()
 
@@ -85,6 +101,20 @@ def gen_pop1(mleinput,residues,larmor):
 
     dw_random = list( 0.1*larmor * np.random.random(len(residues)) ) ## Every delta_w is 0-0.1 ppm CSP
 
+    return Kd_exp_random + kex_exp_random + dR2_random + amp_random + nh_scale_random + i_noise_random + cs_noise_random + dw_random
+
+def gen_pygpop(pop,gvs,larmor):
+    Kd_exp_random = list(pop[0] + np.random.random(1)*0.2-0.1)
+    kex_exp_random = list(pop[1] + np.random.random(1)*0.2-0.1)
+    dR2_random = list(pop[2] + np.random.random(1)*40-20)
+    amp_random = list(pop[3] + np.random.random(1)*pop[3]*0.4-pop[3]*0.2)
+    nh_scale_random = list(pop[4] + np.random.random(1)*0.1-0.05)
+    i_noise_random = list(pop[5] + np.random.random(1)*pop[5]*0.4-pop[5]*0.2)
+    cs_noise_random = list(pop[6] + np.random.random(1)*pop[6]*0.4-pop[6]*0.2)
+    
+    dw_random = list( np.array(pop[gvs:])*np.random.random(len(pop)-gvs)*3 )
+    #dw_random = list( np.array(pop[gvs:]) + np.random.random(len(pop)-gvs)*larmor*0.2-0.1*larmor )
+    
     return Kd_exp_random + kex_exp_random + dR2_random + amp_random + nh_scale_random + i_noise_random + cs_noise_random + dw_random
 
 def gen_pop2(optimizer,resgrouped,residues):
@@ -217,6 +247,11 @@ def run_malice(config):
     nh_scale = 0.2  # Start here, update after optimized in phase 1
     bootstraps = config.bootstraps
     
+    tol = config.tolerance
+    
+    pygmo_seed = 2394
+    pg.set_global_rng_seed(seed = pygmo_seed)
+    
     mleinput, resgrouped, residues = parse_input(config.input_file, larmor, nh_scale)
     
     i_noise_est = np.mean(mleinput.intensity)/10
@@ -238,19 +273,46 @@ def run_malice(config):
     
     if config.pygmo:
         optimizer.pygmo = True
-        archi = pg.archipelago(prob = pg.problem(optimizer))
+        
+        archi = pg.archipelago(prob = pg.problem(optimizer),
+                               s_pol = pg.select_best(0.10),
+                               r_pol = pg.fair_replace(0.05),
+                               t = pg.fully_connected(),
+                               seed = pygmo_seed+25)
+        archi.set_migration_type(pg.migration_type.broadcast)
         for iteration in range(config.phase1_iter):
             pop = pg.population(pg.problem(optimizer))
             for x in range(config.pop_size):    pop.push_back( gen_pop1(mleinput,residues,larmor) )
             #archi.push_back(pop = pop, algo = pg.de(gen=config.evo_max_iter,variant=6,CR=0.7,ftol=1e-4))
-            archi.push_back(pop = pop, algo = pg.sade(gen=config.evo_max_iter,variant=6,variant_adptv=2,ftol=1e-7,xtol=1e-7,seed=1337))
+            archi.push_back(pop = pop, algo = pg.sade(gen=config.pygmo_evo_iter,variant=6,variant_adptv=2,ftol=tol,xtol=tol, seed=pygmo_seed+10*(iteration+1)))
             #archi.push_back(pop = pop, algo = pg.de1220(gen=config.evo_max_iter,variant_adptv=2,ftol=1e-4))
-        archi.evolve()
+        print(archi)
+        archi.evolve(config.pygmo_evo_cycles_1)
         archi.wait()
         best_score = np.array(archi.get_champions_f()).min()
         print(best_score)
         best_index = archi.get_champions_f().index(best_score)
         optimizer.model1 = archi.get_champions_x()[best_index]
+        
+        '''
+        for i in range(5):
+            archi = pg.archipelago(prob = pg.problem(optimizer))
+            for iteration in range(config.thread_count):
+                pop = pg.population(pg.problem(optimizer))
+                if i > 0:
+                    pop.push_back( best_model )
+                    for x in range(config.pop_size-1):    pop.push_back( gen_pygpop(best_model,gvs,larmor) )
+                else:
+                    for x in range(config.pop_size):    pop.push_back( gen_pop1(mleinput,residues,larmor) )
+                archi.push_back(pop = pop, algo = pg.sade(gen=config.pygmo_evo_iter,variant=6,variant_adptv=2,ftol=tol,xtol=tol,seed=1337))
+            archi.evolve()
+            archi.wait()
+            best_score = np.array(archi.get_champions_f()).min()
+            print(best_score)
+            best_index = archi.get_champions_f().index(best_score)
+            best_model = archi.get_champions_x()[best_index]
+        optimizer.model1 = best_model
+        '''
         
     else:
         optimizer.pygmo = False
@@ -306,12 +368,34 @@ def run_malice(config):
     ## Set up replicate populations and run
     if config.pygmo:
         optimizer.pygmo = True
+        
+        archi = pg.archipelago(prob = pg.problem(optimizer),
+                               s_pol = pg.select_best(0.10),
+                               r_pol = pg.fair_replace(0.05),
+                               t = pg.fully_connected(),
+                               seed=pygmo_seed-25)
+        archi.set_migration_type(pg.migration_type.broadcast)
+        for iteration in range(config.phase2_iter):
+            pop = pg.population(pg.problem(optimizer))
+            for x in range(config.pop_size):    pop.push_back( gen_pop2(optimizer,resgrouped,residues) )
+            archi.push_back(pop = pop, algo = pg.sade(gen=config.pygmo_evo_iter,variant=6,variant_adptv=2,ftol=tol,xtol=tol, seed=pygmo_seed-10*(iteration+1)))
+        print(archi)
+        archi.evolve(config.pygmo_evo_cycles_2)
+        archi.wait()
+        best_score = np.array(archi.get_champions_f()).min()
+        print(best_score)
+        best_index = archi.get_champions_f().index(best_score)
+        optimizer.model2 = archi.get_champions_x()[best_index]
+        
+        
+        
+        '''
         archi = pg.archipelago(prob = pg.problem(optimizer))
         for iteration in range(config.phase2_iter):
             pop = pg.population(pg.problem(optimizer))
             for x in range(config.pop_size):    pop.push_back( gen_pop2(optimizer,resgrouped,residues) )
             #archi.push_back(pop = pop, algo = pg.de(gen=config.evo_max_iter,variant=6,CR=0.7,ftol=1e-4))
-            archi.push_back(pop = pop, algo = pg.sade(gen=config.evo_max_iter,variant=6,variant_adptv=2,ftol=1e-7,seed=1337))
+            archi.push_back(pop = pop, algo = pg.sade(gen=config.evo_max_iter,variant=6,variant_adptv=2,ftol=tol,xtol=tol,seed=1337))
             #archi.push_back(pop = pop, algo = pg.de1220(gen=config.evo_max_iter,variant_adptv=2,ftol=1e-4))
         archi.evolve()
         archi.wait()
@@ -324,6 +408,7 @@ def run_malice(config):
         #model2opt = minimize(optimizer.fitness, model2, method='SLSQP',bounds=optimizer.get_scipy_bounds(),
         #                     tol=1e-7, options={'disp':True,'maxiter': config.least_squares_max_iter})
         optimizer.model2 = model2
+        '''
     else:
         optimizer.pygmo = False
         models2 = []
@@ -510,27 +595,28 @@ def run_malice(config):
     
     
     ## 191127 CODE FOR BOOTSTRAPPING
-    mininitbs = [optimizer.model3[0]-1, optimizer.model3[1]-1, optimizer.model3[2]-20, optimizer.model3[3]/4, 
-               optimizer.model3[4]-0.06, optimizer.model3[5]/4, optimizer.model3[6]/4] + [0]*len(residues)
-    maxinitbs = [optimizer.model3[0]+1, optimizer.model3[1]+1, optimizer.model3[2]+20, optimizer.model3[3]*4, 
-               optimizer.model3[4]+0.06, optimizer.model3[5]*4, optimizer.model3[6]*4] + list(np.array(optimizer.model3[gvs:])*3)
-    optimizer.set_bounds((mininitbs,maxinitbs))
-    optimizer.mode = 'final_opt'
-    algo = pg.algorithm( pg.sade(gen=config.evo_max_iter,variant=6,variant_adptv=2,ftol=1e-7,xtol=1e-7,seed=1337) )
-    bsmodels = []
-    for x in range(bootstraps):
-        optimizer.mleinput = mleinput.sample(frac=1,replace=True)
-        pop = pg.population(pg.problem(optimizer))
-        for x in range(config.pop_size):    pop.push_back( gen_bspop(optimizer,residues,gvs) )
-        evopop = algo.evolve(pop)
-        bsmodels.append(evopop.champion_x)
-    
-    stderr = [np.std([y[i] for y in bsmodels]) for i in range(len(mininitbs))]
-    
-    global_params = ['Kd_exp','koff_exp','dR2','Amp','nh_scale','I_noise','CS_noise']
-    for k in range(gvs):    print(global_params[k]+' = '+str(round(optimizer.model3[k],2))+' +/- '+str(round(stderr[k],2)))
-    
-    dfs['stderr'] = stderr[gvs:]
+    if bootstraps > 0:
+        mininitbs = [optimizer.model3[0]-1, optimizer.model3[1]-1, optimizer.model3[2]-20, optimizer.model3[3]/4, 
+                   optimizer.model3[4]-0.06, optimizer.model3[5]/4, optimizer.model3[6]/4] + [0]*len(residues)
+        maxinitbs = [optimizer.model3[0]+1, optimizer.model3[1]+1, optimizer.model3[2]+20, optimizer.model3[3]*4, 
+                   optimizer.model3[4]+0.06, optimizer.model3[5]*4, optimizer.model3[6]*4] + list(np.array(optimizer.model3[gvs:])*3)
+        optimizer.set_bounds((mininitbs,maxinitbs))
+        optimizer.mode = 'final_opt'
+        algo = pg.algorithm( pg.sade(gen=config.evo_max_iter,variant=6,variant_adptv=2,ftol=1e-7,xtol=1e-7,seed=1337) )
+        bsmodels = []
+        for x in range(bootstraps):
+            optimizer.mleinput = mleinput.sample(frac=1,replace=True)
+            pop = pg.population(pg.problem(optimizer))
+            for x in range(config.pop_size):    pop.push_back( gen_bspop(optimizer,residues,gvs) )
+            evopop = algo.evolve(pop)
+            bsmodels.append(evopop.champion_x)
+        
+        stderr = [np.std([y[i] for y in bsmodels]) for i in range(len(mininitbs))]
+        
+        global_params = ['Kd_exp','koff_exp','dR2','Amp','nh_scale','I_noise','CS_noise']
+        for k in range(gvs):    print(global_params[k]+' = '+str(round(optimizer.model3[k],2))+' +/- '+str(round(stderr[k],2)))
+        
+        dfs['stderr'] = stderr[gvs:]
 
     ## Perform likelihood ratio tests
     ##### DISABLE ALL OF THESE FOR THE TIME BEING -- NEEDS TO BE REWRITTEN
