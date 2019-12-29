@@ -5,10 +5,11 @@ import itertools
 
 class MaliceOptimizer(object):
 
-    def __init__(self, larmor=500,gvs=7,lam=.01,cs_dist='gaussian',mleinput=None,resgrouped=None,residues=None,mode=None):
+    def __init__(self, larmor=500,gvs=7,lam=.01,cs_dist='gaussian',nh_scale=0.2,mleinput=None,resgrouped=None,residues=None,mode=None):
         self.larmor = larmor
         self.gvs = gvs
         self.lam = lam
+        self.nh_scale = nh_scale
         self.mleinput = mleinput
         self.resgrouped = resgrouped
         self.residues = residues
@@ -28,23 +29,27 @@ class MaliceOptimizer(object):
     
     def fitness(self, params=None):
         if self.mode == 'global+dw':
-            Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise = params[:self.gvs]
+            #Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise = params[:self.gvs]
+            Kd_exp, koff_exp, dR2, amp, i_noise, cs_noise = params[:self.gvs]
             resparams = self.resgrouped.copy().rename(columns={'intensity':'I_ref','15N':'15N_ref','1H':'1H_ref'})
             resparams['dw'] = params[self.gvs:]
         elif self.mode == 'refpeak_opt':
-            Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise = self.model1[:self.gvs]
+            #Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise = self.model1[:self.gvs]
+            Kd_exp, koff_exp, dR2, amp, i_noise, cs_noise = self.model1[:self.gvs]
             resparams = pd.DataFrame({'residue':self.residues,'15N_ref':params[:int(len(params)/3)],
                                       '1H_ref':params[int(len(params)/3):2*int(len(params)/3)],
                                       'I_ref':params[2*int(len(params)/3):],'dw':self.model1[self.gvs:]})
         elif self.mode == 'dw_scale':
-            Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise, scale = params[:self.gvs+1]
+            #Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise, scale = params[:self.gvs+1]
+            Kd_exp, koff_exp, dR2, amp, i_noise, cs_noise, scale = params[:self.gvs+1]
             resparams = pd.DataFrame({'residue':self.residues,
                                       '15N_ref':self.model2[:int(len(self.model2)/3)], 
                                       '1H_ref':self.model2[int(len(self.model2)/3):2*int(len(self.model2)/3)],
                                       'I_ref':self.model2[2*int(len(self.model2)/3):]})
             resparams['dw'] = self.model1[self.gvs:]*scale
         elif self.mode == 'final_opt':
-            Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise = params[:self.gvs]
+            #Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise = params[:self.gvs]
+            Kd_exp, koff_exp, dR2, amp, i_noise, cs_noise = params[:self.gvs]
             resparams = pd.DataFrame({'residue':self.residues,
                                       '15N_ref':self.model2[:int(len(self.model2)/3)], 
                                       '1H_ref':self.model2[int(len(self.model2)/3):2*int(len(self.model2)/3)],
@@ -52,7 +57,8 @@ class MaliceOptimizer(object):
                                       'dw':params[self.gvs:]})
         elif self.mode in ['pfitter','lfitter']:
             ## Output the per-residue fits
-            Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise = self.model3[:self.gvs]
+            #Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise = self.model3[:self.gvs]
+            Kd_exp, koff_exp, dR2, amp, i_noise, cs_noise = self.model3[:self.gvs]
             
             concs = self.mleinput[['tit','obs']].drop_duplicates()
             tit_obs_lm = stats.linregress(concs.tit,concs.obs)
@@ -95,6 +101,11 @@ class MaliceOptimizer(object):
         kf = free_tit*kon
         kex = kr + kf
         
+        #Adjust the amplitude if the observed concentration is not equal for all points
+        obsconc = list(self.mleinput.obs.drop_duplicates())
+        if len(obsconc) > 1:
+            amp = amp*(self.mleinput.obs/np.mean(obsconc))
+        
         broad_denom = np.square(np.square(kex) + (1-5*pa*pb)*np.square(df.dw)) + 4*pa*pb*(1-4*pa*pb)*np.power(df.dw,4)
         
         #Compute the fits
@@ -105,15 +116,15 @@ class MaliceOptimizer(object):
         
         if self.mode == 'lfitter':
             df['ifit'] = ihat
-            df['csfit'] = cshat
+            df['csfit'] = cshat/self.larmor #Return as ppm and not Hz
             return df
             
-        csobs = self.larmor*(np.sqrt( np.square(nh_scale*(df['15N'] - df['15N_ref'])) + np.square(df['1H'] - df['1H_ref']) ))
+        csobs = self.larmor*(np.sqrt( np.square(self.nh_scale*(df['15N'] - df['15N_ref'])) + np.square(df['1H'] - df['1H_ref']) ))
         
         if self.mode == 'pfitter':
-            df['csp'] = csobs
+            df['csp'] = csobs/self.larmor #Returns as ppm and not Hz
             df['ifit'] = ihat
-            df['csfit'] = cshat
+            df['csfit'] = cshat/self.larmor #Return as ppm and not Hz
             return df
     
         
