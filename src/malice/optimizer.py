@@ -5,18 +5,31 @@ import itertools
 
 class MaliceOptimizer(object):
 
-    def __init__(self, larmor=500,gvs=7,lam=.01,cs_dist='gaussian',nh_scale=0.2,mleinput=None,resgrouped=None,residues=None,mode=None):
+    def __init__(self, larmor=500,gvs=6,lam=0.0,cs_dist='gaussian',nh_scale=0.2,data=None,resgrouped=None,residues=None,mode=None,model1=None,model2=None,model3=None,bootstrap=False):
         self.larmor = larmor
         self.gvs = gvs
         self.lam = lam
         self.nh_scale = nh_scale
-        self.mleinput = mleinput
-        self.resgrouped = resgrouped
-        self.residues = residues
+        self.data = data
         self.mode = mode
         self.cs_dist = cs_dist
         self.i = 0
-        self.pygmo = False
+        self.model1 = model1
+        self.model2 = model2
+        self.model3 = model3
+        self.bootstrap = bootstrap
+        
+        self.residues = list(self.data.groupby('residue').groups.keys())
+        
+        
+        self.reference = pd.DataFrame()
+        for res in self.residues:
+            resdata = self.data.copy()[self.data.residue == res]
+            self.reference = self.reference.append(resdata.loc[resdata.intensity == np.max(resdata.intensity),['residue','15N','1H','intensity']])
+        self.reference = self.reference.rename(columns={'intensity':'I_ref','15N':'15N_ref','1H':'1H_ref'})
+        
+        if self.bootstrap == True:
+            self.data = self.data.sample(frac=1,replace=True)
     
     def set_bounds(self, bds):
         self.bounds = bds
@@ -29,35 +42,31 @@ class MaliceOptimizer(object):
     
     def fitness(self, params=None):
         if self.mode == 'global+dw':
-            #Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise = params[:self.gvs]
             Kd_exp, koff_exp, dR2, amp, i_noise, cs_noise = params[:self.gvs]
-            resparams = self.resgrouped.copy().rename(columns={'intensity':'I_ref','15N':'15N_ref','1H':'1H_ref'})
-            resparams['dw'] = params[self.gvs:]
+            residue_params = self.reference.copy()
+            residue_params['dw'] = params[self.gvs:]
+            self.mleinput = self.data.copy()
         elif self.mode == 'refpeak_opt':
-            #Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise = self.model1[:self.gvs]
             Kd_exp, koff_exp, dR2, amp, i_noise, cs_noise = self.model1[:self.gvs]
-            resparams = pd.DataFrame({'residue':self.residues,'15N_ref':params[:int(len(params)/3)],
+            
+            residue_params = pd.DataFrame({'residue':self.residues,'15N_ref':params[:int(len(params)/3)],
                                       '1H_ref':params[int(len(params)/3):2*int(len(params)/3)],
                                       'I_ref':params[2*int(len(params)/3):],'dw':self.model1[self.gvs:]})
+            
+            self.mleinput = self.data.copy()
         elif self.mode == 'dw_scale':
-            #Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise, scale = params[:self.gvs+1]
             Kd_exp, koff_exp, dR2, amp, i_noise, cs_noise, scale = params[:self.gvs+1]
-            resparams = pd.DataFrame({'residue':self.residues,
-                                      '15N_ref':self.model2[:int(len(self.model2)/3)], 
-                                      '1H_ref':self.model2[int(len(self.model2)/3):2*int(len(self.model2)/3)],
-                                      'I_ref':self.model2[2*int(len(self.model2)/3):]})
-            resparams['dw'] = self.model1[self.gvs:]*scale
+            residue_params = self.reference.copy()
+            residue_params['dw'] = self.model1[self.gvs:]*scale
+            self.mleinput = self.data
         elif self.mode == 'final_opt':
-            #Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise = params[:self.gvs]
             Kd_exp, koff_exp, dR2, amp, i_noise, cs_noise = params[:self.gvs]
-            resparams = pd.DataFrame({'residue':self.residues,
-                                      '15N_ref':self.model2[:int(len(self.model2)/3)], 
-                                      '1H_ref':self.model2[int(len(self.model2)/3):2*int(len(self.model2)/3)],
-                                      'I_ref':self.model2[2*int(len(self.model2)/3):],
-                                      'dw':params[self.gvs:]})
+            residue_params = self.reference.copy()
+            residue_params['dw'] = params[self.gvs:]
+                
+            self.mleinput = self.data
         elif self.mode in ['pfitter','lfitter']:
             ## Output the per-residue fits
-            #Kd_exp, koff_exp, dR2, amp, nh_scale, i_noise, cs_noise = self.model3[:self.gvs]
             Kd_exp, koff_exp, dR2, amp, i_noise, cs_noise = self.model3[:self.gvs]
             
             concs = self.mleinput[['tit','obs']].drop_duplicates()
@@ -73,19 +82,16 @@ class MaliceOptimizer(object):
             res_df = pd.DataFrame(itertools.product(tit_vals,self.residues),
                                   columns=['tit','residue'])
             fitter_input = pd.merge(fitter_input,res_df,on='tit')
-
-            resparams = pd.DataFrame({'residue':self.residues,
-                                      '15N_ref':self.model2[:int(len(self.model2)/3)], 
-                                      '1H_ref':self.model2[int(len(self.model2)/3):2*int(len(self.model2)/3)],
-                                      'I_ref':self.model2[2*int(len(self.model2)/3):],
-                                      'dw':self.model3[self.gvs:]})
+            residue_params = self.reference.copy()
+            residue_params['dw'] = self.model3[self.gvs:]
+            self.mleinput = self.data
 
         else:
             print('UNSUPPORTED OPTIMIZATION MODE')
             return 0
         
-        if self.mode == 'lfitter':   df = pd.merge(fitter_input, resparams,on='residue')
-        else:   df = pd.merge(self.mleinput,resparams,on='residue')
+        if self.mode == 'lfitter':   df = pd.merge(fitter_input, residue_params,on='residue')
+        else:   df = pd.merge(self.mleinput,residue_params,on='residue')
         
         Kd = np.power(10,Kd_exp)
         koff = np.power(10,koff_exp)
@@ -141,8 +147,7 @@ class MaliceOptimizer(object):
         
         negLL = -1*(logLL_int + logLL_cs - self.lam*np.sum(np.abs(df.dw)))
         
-        if self.pygmo:  return(negLL, )
-        else:   return(negLL)
+        return(negLL, )
 
     def derivative(self, ):
         ## Return the derivative for each variable in the 
