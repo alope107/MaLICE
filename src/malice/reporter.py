@@ -17,11 +17,11 @@ def truncate_colormap(cmap, minval=0.0, maxval=1.0, n=256):
 
 
 
-class MaLICE_PDF(FPDF):
+class CompLEx_PDF(FPDF):
  
     def header(self):
         self.set_font('Arial', 'B', 14)
-        self.cell(0, 22/72, txt='MaLICE-NMR v1', ln=0, align='L')
+        self.cell(0, 22/72, txt='CompLEx-NMR v1', ln=0, align='L')
         self.cell(0, 22/72, txt='Job # blahdeblah', ln=1, align='R')
         #self.ln(1)
  
@@ -34,7 +34,7 @@ class MaLICE_PDF(FPDF):
         self.cell(0, 0, page, 0, 0, 'C')
 
 
-def generate_sim_spectrum(optimizer, fit_peaks, larmor, residue, theta, figure_path):
+def generate_sim_spectrum(optimizer, fit_peaks, larmor, residue, theta, theta_se, titrant_concs, color_palette, figure_path):
     # Sample sparky dictionary
     udic = {'ndim': 2,
             0: {'car': larmor*0.10137*119,
@@ -69,35 +69,36 @@ def generate_sim_spectrum(optimizer, fit_peaks, larmor, residue, theta, figure_p
     
     #set contour levels
     #contour_start = optimizer.data.intensity.min()*10
-    contour_start = optimizer.reference.I_ref.min()/1.5
+    contour_start = optimizer.reference.I_ref.min()/5
     contour_num = 15
     contour_factor = 1.2
     contour_levels = contour_start * contour_factor ** np.arange(contour_num)
-    contour_linewidth = 2.5
+    contour_linewidth = 0.2
     
     
     
     max_csp = float(max([fit_peaks.csp.max(), fit_peaks.csfit.max()]))
-    if max_csp < 0.2:   max_csp = 0.2
+    ## Overwrite with max_dw
+    #max_csp = float(fit_peaks.dw.max())/larmor
+    if max_csp < 0.15:   max_csp = 0.15
+    
+    
     
     
     h_ref = float(optimizer.reference.loc[optimizer.reference.residue == residue, '1H_ref'])
     n_ref = float(optimizer.reference.loc[optimizer.reference.residue == residue, '15N_ref'])
     
-    focal_peaks = fit_peaks[fit_peaks.residue == residue]
-    nonfocal_peaks = fit_peaks[(fit_peaks.residue != residue) &
-                                 (fit_peaks.tit == fit_peaks.tit.min())]
+    focal_peaks = fit_peaks.copy()[fit_peaks.residue == residue]
+    nonfocal_peaks = fit_peaks.copy()[(fit_peaks.residue != residue) &
+                                      (fit_peaks.titrant == fit_peaks.titrant.min())]
     
     ## For the moment, let's just let everything be at a vertical 45deg angle for simplicity
-    #theta = np.pi/4
-    amplitude = optimizer.ml_model[3]
-    #res_amps = [amplitude]*len(residue_peaks)
-    #nonfocal_amps = [amplitude]*len(nonfocal_peaks)
+    amplitude_scaler = optimizer.ml_model[3]
     
     
     
     ## Initialize the figure
-    fig, ax = plt.subplots(figsize=(3,3))
+    fig, ax = plt.subplots(figsize=(3.1,3.1))
     ax.set(xlim=(h_ref+1.2*max_csp, h_ref-1.2*max_csp),
            ylim=(n_ref+1.2*max_csp/optimizer.nh_scale, n_ref-1.2*max_csp/optimizer.nh_scale))
     ax.set_title('Simulated $^{15}$N-HSQC',fontsize=10)
@@ -115,7 +116,7 @@ def generate_sim_spectrum(optimizer, fit_peaks, larmor, residue, theta, figure_p
         h_loc = float(nonfocal_peaks.loc[nonfocal_peaks.residue == nonfocal_residue, '1H_ref'])
         pts_1H = uc_1H.f(h_loc, 'ppm')
         
-        lw_Hz = amplitude/float(nonfocal_peaks.loc[nonfocal_peaks.residue == nonfocal_residue, 'I_ref'])
+        lw_Hz = amplitude_scaler/float(nonfocal_peaks.loc[nonfocal_peaks.residue == nonfocal_residue, 'I_ref'])
         lw_1H = lw_Hz/udic[1]['sw']*udic[1]['size']
         lw_15N = lw_Hz/udic[0]['sw']*udic[0]['size']*optimizer.nh_scale
         
@@ -135,41 +136,34 @@ def generate_sim_spectrum(optimizer, fit_peaks, larmor, residue, theta, figure_p
     nonfocal_ppm_15n_0, nonfocal_ppm_15n_1 = nonfocal_uc_15n.ppm_limits()
     
     greyscale = cm.Greys_r
-    dim_greyscale = truncate_colormap(greyscale, minval=0.7, maxval=1.0, n=256)
+    dim_greyscale = truncate_colormap(greyscale, minval=0.55, maxval=1.0, n=256)
     
+    zorder = 1
     
+    #ax.contour(simulated_nonfocal_data, contour_levels, cmap=dim_greyscale,
+    #           extent=(nonfocal_ppm_1h_0, nonfocal_ppm_1h_1, nonfocal_ppm_15n_0, nonfocal_ppm_15n_1),
+    #           linewidths=contour_linewidth, zorder=zorder)
     
-    ax.contour(simulated_nonfocal_data, contour_levels, cmap=dim_greyscale,
+    ax.contour(simulated_nonfocal_data, contour_levels, colors = [greyscale(0.5)],
                extent=(nonfocal_ppm_1h_0, nonfocal_ppm_1h_1, nonfocal_ppm_15n_0, nonfocal_ppm_15n_1),
-               linewidths=contour_linewidth)
+               linewidths=contour_linewidth, zorder=zorder)
     
     
     
     
     # Now loop over the focal residue at each titrant concentration
-    
+    focal_peaks['15N_fit'] = focal_peaks['15N_ref'] - focal_peaks.csfit*np.sin(theta)/optimizer.nh_scale
+    focal_peaks['1H_fit'] = focal_peaks['1H_ref'] - focal_peaks.csfit*np.cos(theta)   
+    '''
     tit_concs = list(focal_peaks.tit.unique())
     tit_concs.sort()
     
-    black_red_cdict = {'red':   [[0.0,  0.0, 0.0],
-                                 [1.0,  1.0, 1.0]],
-                       'green': [[0.0,  0.0, 0.0],
-                                 [1.0,  0.0, 0.0]],
-                       'blue':  [[0.0,  0.0, 0.0],
-                                 [1.0,  0.0, 0.0]]}
-    blue_red_cdict = {'red':   [[0.0,  0.25, 0.25],
-                                [1.0,  0.85, 0.85]],
-                      'green': [[0.0,  0.3, 0.3],
-                                [1.0,  0.3, 0.3]],
-                      'blue':  [[0.0,  0.85, 0.85],
-                                [1.0,  0.25, 0.25]]}
-    black_red = colors.LinearSegmentedColormap('black_red', segmentdata=black_red_cdict, N=256)
-    blue_red = colors.LinearSegmentedColormap('blue_red', segmentdata=blue_red_cdict, N=256)
-    #shades = black_red( np.array(tit_concs)/max(tit_concs)  )
-    shades = blue_red( np.array(tit_concs)/max(tit_concs)  )
-    tit_colors = dict(zip(tit_concs,shades))
-    for tit_conc in tit_concs:
-        focal_peak = focal_peaks[focal_peaks.tit == tit_conc]
+    
+    '''
+    # Use the new color palette variable that I'm passing in
+    titrant_colors = dict(zip(titrant_concs,color_palette))
+    for titrant_conc in titrant_concs:
+        focal_peak = focal_peaks[focal_peaks.titrant == titrant_conc]
         focal_intensity = [float(focal_peak.ifit)]
         
         csp_15N = float( n_ref - focal_peak.csfit*np.sin(theta)/optimizer.nh_scale )
@@ -177,7 +171,7 @@ def generate_sim_spectrum(optimizer, fit_peaks, larmor, residue, theta, figure_p
         csp_1H = float ( h_ref - focal_peak.csfit*np.cos(theta) )
         pt_1H = uc_1H.f(csp_1H, 'ppm')
         
-        lw_Hz = amplitude/float(focal_peak.ifit)
+        lw_Hz = amplitude_scaler/float(focal_peak.ifit)
         lw_1H = lw_Hz/udic[1]['sw']*udic[1]['size']
         lw_15N = lw_Hz/udic[0]['sw']*udic[0]['size']*optimizer.nh_scale
         
@@ -196,19 +190,37 @@ def generate_sim_spectrum(optimizer, fit_peaks, larmor, residue, theta, figure_p
         focal_ppm_15n = focal_uc_15n.ppm_scale()
         focal_ppm_15n_0, focal_ppm_15n_1 = focal_uc_15n.ppm_limits()
         
-        tit_cdict = {'red':   [[0.0,  tit_colors[tit_conc][0], tit_colors[tit_conc][0]],
+        titrant_cdict = {'red':   [[0.0,  titrant_colors[titrant_conc][0], titrant_colors[titrant_conc][0]],
                                [1.0,  1.0, 1.0]],
-                     'green': [[0.0,  tit_colors[tit_conc][1], tit_colors[tit_conc][1]],
+                     'green': [[0.0,  titrant_colors[titrant_conc][1], titrant_colors[titrant_conc][1]],
                                [1.0,  1.0, 1.0]],
-                     'blue':  [[0.0,  tit_colors[tit_conc][2], tit_colors[tit_conc][2]],
+                     'blue':  [[0.0,  titrant_colors[titrant_conc][2], titrant_colors[titrant_conc][2]],
                                [1.0,  1.0, 1.0]]}
-        tit_cmap = colors.LinearSegmentedColormap('tit_'+format(tit_conc/max(tit_concs),'.2g'), segmentdata=tit_cdict, N=256)
+        titrant_cmap = colors.LinearSegmentedColormap('titrant_'+format(titrant_conc/max(titrant_concs),'.2g'), segmentdata=titrant_cdict, N=256)
         
-        ax.contour(simulated_focal_data, contour_levels, cmap = tit_cmap,
+        zorder+=1
+        #ax.contour(simulated_focal_data, contour_levels, cmap = titrant_cmap,
+        #       extent=(focal_ppm_1h_0, focal_ppm_1h_1, focal_ppm_15n_0, focal_ppm_15n_1),
+        #       linewidths=contour_linewidth, zorder=zorder)
+        ax.contour(simulated_focal_data, contour_levels, colors = [titrant_colors[titrant_conc]],
                extent=(focal_ppm_1h_0, focal_ppm_1h_1, focal_ppm_15n_0, focal_ppm_15n_1),
-               linewidths=contour_linewidth)
+               linewidths=contour_linewidth, zorder=zorder)
         #if tit_conc == max(tit_concs):
         #    ax.text(h_ref-0.06,n_ref-0.25,'('+str(round(csp_15N-n_ref,1))+', '+str(round(csp_1H-h_ref,3))+')',fontsize=8)
+    
+    ## Add the original points to the spectrum
+    #ax.scatter('1H', '15N', data=focal_peaks, c='black', s=16, zorder=2)
+    zorder+=1
+    ax.scatter('1H', '15N', data=focal_peaks, c=color_palette, s=48, zorder=zorder,
+               edgecolors='black', linewidth=1.2)
+    
+    ## Draw a dotted line around where delta w is expected to be
+    xt = np.linspace(0,2*np.pi,1000)
+    #dw = float(list(focal_peaks.dw)[0])
+    dw = float(focal_peaks.dw.mean())
+    ht = h_ref + dw*np.cos(xt)
+    nt = n_ref + dw*np.sin(xt)/optimizer.nh_scale
+    ax.plot(ht,nt,linestyle='dashed',c='black',linewidth=0.5)
     
     fig.tight_layout(pad=0.3)
     
@@ -220,8 +232,8 @@ def generate_sim_spectrum(optimizer, fit_peaks, larmor, residue, theta, figure_p
     return file_name
 
 
-def MaliceReport(optimizer, config, performance, lam, seed, image_dir):
-    pdf = MaLICE_PDF(orientation='portrait', unit='in', format='letter')
+def CompLEx_Report(optimizer, config, performance, lam, seed, image_dir):
+    pdf = CompLEx_PDF(orientation='portrait', unit='in', format='letter')
     pdf.set_margins(0.5,0.5,0.5)
     pdf.add_font('DejaVu', '', 'DejaVuSansCondensed.ttf', uni=True)
     pdf.add_font('DejaVu', 'B', 'DejaVuSansCondensed-Bold.ttf', uni=True)
@@ -230,24 +242,24 @@ def MaliceReport(optimizer, config, performance, lam, seed, image_dir):
     pdf.add_page()
     
     pdf.set_font('Arial','B',16)
-    pdf.cell(0,20/72,txt='Report of MaLICE Results',ln=1,align='C')
+    pdf.cell(0,20/72,txt='Report of CompLEx Results',ln=1,align='C')
     pdf.ln(0.1)
     
     pdf.set_font('Arial','B',12)
     pdf.cell(5, 12/72, txt='', ln=0)
     pdf.cell(1, 12/72, txt='Concentrations (uM)', ln=1, align='C')
-    pdf.cell(1.8, 12/72, txt='Observed protein: ', ln=0, align='R')
+    pdf.cell(1.8, 12/72, txt='NMR visible protein: ', ln=0, align='R')
     pdf.set_font('Arial','',12)
-    pdf.cell(3.2, 12/72, txt=config.observable, ln=0, align='L')
-    if len(optimizer.data.obs.unique()) == 1:
-        pdf.cell(1, 12/72, txt=str(int(optimizer.data.obs[0])), ln=1, align='C')
+    pdf.cell(3.2, 12/72, txt=config.visible, ln=0, align='L')
+    if len(optimizer.data.visible.unique()) == 1:
+        pdf.cell(1, 12/72, txt=str(int(optimizer.data.visible[0])), ln=1, align='C')
     else:
-        pdf.cell(1, 12/72, txt=str(round(optimizer.data.obs.min()))+' - '+str(round(optimizer.data.obs.max())), ln=1, align='C')
+        pdf.cell(1, 12/72, txt=str(round(optimizer.data.visible.min()))+' - '+str(round(optimizer.data.visible.max())), ln=1, align='C')
     pdf.set_font('Arial','B',12)
     pdf.cell(1.8, 12/72, txt='Titrant: ', ln=0, align='R')
     pdf.set_font('Arial','',12)
     pdf.cell(3.2, 12/72, txt=config.titrant, ln=0, align='L')
-    pdf.cell(1, 12/72, txt=str(round(optimizer.data.tit.min()))+' - '+str(round(optimizer.data.tit.max())), ln=1, align='C')
+    pdf.cell(1, 12/72, txt=str(round(optimizer.data.titrant.min()))+' - '+str(round(optimizer.data.titrant.max())), ln=1, align='C')
     pdf.ln(0.2)
     pdf.set_font('Arial','B',12)
     pdf.cell(1.8, 12/72, txt='Data file: ', ln=0, align='R')
@@ -270,7 +282,7 @@ def MaliceReport(optimizer, config, performance, lam, seed, image_dir):
     
     pdf.ln(0.2)
     
-    opt_params_text = [('L1 λ', format(lam, '.2f')),
+    opt_params_text = [('L1 λ', format(lam, '.3f')),
                        ('Phase 1 islands', config.phase1_islands),
                        ('Phase 1 generations', config.phase1_generations),
                        ('Phase 1 rounds of evolution', config.phase1_evo_rounds),
@@ -323,13 +335,14 @@ def MaliceReport(optimizer, config, performance, lam, seed, image_dir):
     
     
     ## Insert table of global variable and estimates
-    width = 0.85
+    #width = 0.85
+    width = 1.0
     
     pdf.set_line_width(1/72)
     #pdf.set_fill_color(255, 255, 255)
-    pdf.rect(curr_x, pdf.get_y()-0.02, 5*width+0.02,(12+7*10)/72+0.10, 'D') 
-    
-    global_variables_text = (('Kd (uM)', round(np.power(10,optimizer.ml_model[0]),1), round(np.power(10,optimizer.ml_model_stderrs[0]),1),
+    pdf.rect(curr_x, pdf.get_y()-0.02, 4*width+0.02,(12+7*10)/72+0.10, 'D')
+    ''' 
+    global_variables_text = (('Kd (uM)', format(np.power(10,optimizer.ml_model[0]),'.1f'), format(np.power(10,optimizer.ml_model_stderrs[0]),'.1f'),
                               round(np.power(10,optimizer.lower_conf_limits[0]),1), round(np.power(10,optimizer.upper_conf_limits[0]),1)),
                              ('koff (Hz)', round(np.power(10,optimizer.ml_model[1]),1), round(np.power(10,optimizer.ml_model_stderrs[1]),1),
                               round(np.power(10,optimizer.lower_conf_limits[1]),1), round(np.power(10,optimizer.upper_conf_limits[1]),1)),
@@ -340,7 +353,16 @@ def MaliceReport(optimizer, config, performance, lam, seed, image_dir):
                              ('Intensity ε', format(optimizer.ml_model[4],'.2g'), format(optimizer.ml_model_stderrs[4],'.2g'),
                               format(optimizer.lower_conf_limits[4],'.2g'), format(optimizer.upper_conf_limits[4],'.2g')),
                              ('CS ε (Hz)', round(optimizer.ml_model[5],2), round(optimizer.ml_model_stderrs[5],2), 
-                              round(optimizer.lower_conf_limits[5],2), round(optimizer.upper_conf_limits[5],2)))    
+                              round(optimizer.lower_conf_limits[5],2), round(optimizer.upper_conf_limits[5],2)))  
+    '''
+    global_variables_text = (('Kd (uM)', format(np.power(10,optimizer.ml_model[0]),'.1f'), format(np.power(10,optimizer.lower_conf_limits[0]),'.1f'),
+                              format(np.power(10,optimizer.upper_conf_limits[0]),'.1f')),
+                             ('koff (Hz)', format(np.power(10,optimizer.ml_model[1]),'.1f'), format(np.power(10,optimizer.lower_conf_limits[1]),'.1f'),
+                              format(np.power(10,optimizer.upper_conf_limits[1]),'.1f')),
+                             ('ΔR2 (Hz)', format(optimizer.ml_model[2],'.2f'), format(optimizer.lower_conf_limits[2],'.2f'), format(optimizer.upper_conf_limits[2],'.2f')),
+                             ('Amplitude scaler', format(optimizer.ml_model[3],'.2g'), format(optimizer.lower_conf_limits[3],'.2g'), format(optimizer.upper_conf_limits[3],'.2g')),
+                             ('Intensity ε', format(optimizer.ml_model[4],'.2g'), format(optimizer.lower_conf_limits[4],'.2g'), format(optimizer.upper_conf_limits[4],'.2g')),
+                             ('CS ε (Hz)', format(optimizer.ml_model[5],'.2f'), format(optimizer.lower_conf_limits[5],'.2f'), format(optimizer.upper_conf_limits[5],'.2f')))  
     pdf.set_font('DejaVu','BI',12)
     pdf.set_x(curr_x)
     pdf.cell(3,14/72,txt='Global variables:',ln=1,border=0,align='L')
@@ -350,26 +372,27 @@ def MaliceReport(optimizer, config, performance, lam, seed, image_dir):
     pdf.cell(width, 10/72, txt='Variable', ln=0, align='L')
     pdf.set_x(curr_x+width)
     pdf.cell(width, 10/72, txt='ML Estimate', ln=0, align='C')
+    #pdf.set_x(curr_x+2*width)
+    #pdf.cell(width, 10/72, txt='Std Error', ln=0, align='C')
     pdf.set_x(curr_x+2*width)
-    pdf.cell(width, 10/72, txt='Std Error', ln=0, align='C')
-    pdf.set_x(curr_x+3*width)
     alpha_l = (1-config.confidence)/2
     alpha_u = 1-alpha_l
-    pdf.cell(width, 10/72, txt=format(alpha_l,'.0%')+' CL', ln=0, align='C')
-    pdf.set_x(curr_x+4*width)
-    pdf.cell(width, 10/72, txt=format(alpha_u,'.0%')+ 'CL', ln=1, align='C')
-    for name, mle, stderr, lower_cl, upper_cl in global_variables_text:
+    pdf.cell(width, 10/72, txt=format(alpha_l,'.1%')+' CL', ln=0, align='C')
+    pdf.set_x(curr_x+3*width)
+    pdf.cell(width, 10/72, txt=format(alpha_u,'.1%')+ 'CL', ln=1, align='C')
+    #for name, mle, stderr, lower_cl, upper_cl in global_variables_text:
+    for name, mle, lower_cl, upper_cl in global_variables_text:
         pdf.set_x(curr_x)
         pdf.set_font('DejaVu','I',10)
         pdf.cell(width, 10/72, txt = name, ln=0, align='L')
         pdf.set_font('DejaVu','B',10)
         pdf.set_x(curr_x+width)
         pdf.cell(width, 10/72, txt = str(mle), ln=0, align='C')
+        #pdf.set_x(curr_x+2*width)
+        #pdf.cell(width, 10/72, txt = str(stderr), ln=0, align='C')
         pdf.set_x(curr_x+2*width)
-        pdf.cell(width, 10/72, txt = str(stderr), ln=0, align='C')
-        pdf.set_x(curr_x+3*width)
         pdf.cell(width, 10/72, txt = str(lower_cl), ln=0, align='C')
-        pdf.set_x(curr_x+4*width)
+        pdf.set_x(curr_x+3*width)
         pdf.cell(width, 10/72, txt = str(upper_cl), ln=1, align='C')
     
     pdf.ln(0.1)
@@ -377,8 +400,8 @@ def MaliceReport(optimizer, config, performance, lam, seed, image_dir):
     ## Add a couple of lines about other output files that have been generated
     fname_prefix = config.input_file.split('/')[-1].split('.')[0]
     file_text = (('Reference peak optimization', fname_prefix + '_reference_peaks.csv'),
-                 ('Δω spreadsheeet', fname_prefix + '_MaLICE_fits.csv'),
-                 ('Δω text file', fname_prefix + '_MaLICE_deltaw.txt'))
+                 ('Δω spreadsheeet', fname_prefix + '_CompLEx_fits.csv'),
+                 ('Δω text file', fname_prefix + '_CompLEx_deltaw.txt'))
     pdf.set_font('DejaVu','BI',12)
     pdf.cell(3, 12/72, txt='Output files:', ln=1, align='L')
     for name, var in file_text:
@@ -391,22 +414,29 @@ def MaliceReport(optimizer, config, performance, lam, seed, image_dir):
     
     ## Add plot of the per-residue delta_w fits
     
-    rainbow_cmap = truncate_colormap(plt.get_cmap('hsv_r'), 0.32, 1.0, n=1024)
+    #rainbow_cmap = truncate_colormap(plt.get_cmap('hsv_r'), 0.32, 1.0, n=1024)
+    rainbow_cmap = truncate_colormap(plt.get_cmap('jet'), 0.18, 0.92, n=1024)
     
     deltaw_df = pd.DataFrame({'residue':optimizer.residues,
                               'dw':optimizer.ml_model[optimizer.gvs:]/optimizer.larmor})
     deltaw_df['color'] = deltaw_df.residue/deltaw_df.residue.max()
     fig, ax = plt.subplots(figsize=(7.5,4.5))
-    dw_error_bars = [(optimizer.ml_model[x]-optimizer.lower_conf_limits[x],
-                      optimizer.upper_conf_limits[x]-optimizer.ml_model[x]) for x in range(optimizer.gvs,len(optimizer.ml_model))]
-    ax.errorbar('residue', 'dw', data=deltaw_df, yerr=optimizer.ml_model_stderrs[optimizer.gvs:],
-                color='black', fmt='none', s=32)
-    ax.scatter('residue', 'dw', data=deltaw_df, c=deltaw_df.residue, cmap=rainbow_cmap,
-               edgecolors='black', linewidths=2, s=48)
+    #dw_error_bars = [((optimizer.ml_model[x]-optimizer.lower_conf_limits[x])/optimizer.larmor,
+    #                  (optimizer.upper_conf_limits[x]-optimizer.ml_model[x])/optimizer.larmor) for x in range(optimizer.gvs,len(optimizer.ml_model))]
+    #print(dw_error_bars)
+    #print(len(dw_error_bars))
+    dw_error_bars = [(np.array(optimizer.ml_model[optimizer.gvs:]) - np.array(optimizer.lower_conf_limits[optimizer.gvs:]))/optimizer.larmor,
+                     (np.array(optimizer.upper_conf_limits[optimizer.gvs:]) - np.array(optimizer.ml_model[optimizer.gvs:]))/optimizer.larmor]
+    ax.errorbar('residue', 'dw', data=deltaw_df, yerr=dw_error_bars,
+                color='black', fmt='none', s=32, zorder=1)
+    #ax.scatter('residue', 'dw', data=deltaw_df, c='black', s=48)
+    ax.scatter('residue', 'dw', data=deltaw_df, c=deltaw_df.residue, cmap=rainbow_cmap, edgecolors='black', linewidths=0.5, s=48, zorder=2)
     ax.set(title='Per-residue estimates of Δω', xlabel='Residue No.', ylabel='Δω (ppm)', 
            xlim=(deltaw_df.residue.min()-1,deltaw_df.residue.max()+1),
-           ylim=(-0.05,1.1*deltaw_df.dw.max()))
-    fig.tight_layout()
+           ylim = (-0.02, 1.05*max(optimizer.upper_conf_limits[optimizer.gvs:])/optimizer.larmor))
+           #ylim=(-0.05, 1.1*max(np.array(optimizer.ml_model[optimizer.gvs:]) + np.array(optimizer.upper_conf_limits[optimizer.gvs:]))/optimizer.larmor))
+           #ylim=(-0.05,1.1*max(optimizer.upper_conf_limits[optimizer.gvs:])/optimizer.larmor))
+    fig.tight_layout(pad=0.3)
     fig.savefig(os.path.join(image_dir,'deltaw_plot.png'),dpi=600)
     plt.close(fig)
     
@@ -416,6 +446,50 @@ def MaliceReport(optimizer, config, performance, lam, seed, image_dir):
     
     
     ## End of page 1, now to add residue-specific stuff to subsequent pages
+    optimizer.mode = 'pfitter'
+    fit_points = optimizer.fitness()
+    optimizer.mode = 'lfitter'
+    regression = optimizer.fitness()
+    
+    lower_cl_params = list(optimizer.ml_model[:optimizer.gvs]) + list(optimizer.lower_conf_limits[optimizer.gvs:])
+    lower_cl_regression = optimizer.fitness(lower_cl_params)
+    upper_cl_params = list(optimizer.ml_model[:optimizer.gvs]) + list(optimizer.upper_conf_limits[optimizer.gvs:])
+    upper_cl_regression = optimizer.fitness(upper_cl_params)
+        
+    optimizer.mode = 'simulated_peak_generation'
+    regression_at_titrant_concs = optimizer.fitness()
+    
+    ## Set up the color scheme for plotting over titrant range
+    titrant_concs = list(fit_points.titrant.unique())
+    titrant_concs.sort()
+    
+    black_red_cdict = {'red':   [[0.0,  0.0, 0.0],
+                                 [1.0,  1.0, 1.0]],
+                       'green': [[0.0,  0.0, 0.0],
+                                 [1.0,  0.0, 0.0]],
+                       'blue':  [[0.0,  0.0, 0.0],
+                                 [1.0,  0.0, 0.0]]}
+    blue_red_cdict = {'red':   [[0.0,  0.25, 0.25],
+                                [1.0,  0.85, 0.85]],
+                      'green': [[0.0,  0.3, 0.3],
+                                [1.0,  0.3, 0.3]],
+                      'blue':  [[0.0,  0.85, 0.85],
+                                [1.0,  0.25, 0.25]]}
+                            
+    black_red = colors.LinearSegmentedColormap('black_red', segmentdata=black_red_cdict, N=256)
+    blue_red = colors.LinearSegmentedColormap('blue_red', segmentdata=blue_red_cdict, N=256)
+    
+    plasma_short = truncate_colormap(cm.plasma, minval=0.2, maxval=0.8, n=256)
+    
+    plasma_titrant = plasma_short( np.array(titrant_concs)/max(titrant_concs)  )
+    
+    residue_dw_df = pd.DataFrame({'residue':optimizer.residues,
+                                  'dw':optimizer.ml_model[optimizer.gvs:],
+                                  'lower':optimizer.lower_conf_limits[optimizer.gvs:],
+                                  'upper':optimizer.upper_conf_limits[optimizer.gvs:]})
+    
+    
+    
     i = 0
     for residue in optimizer.residues:
         if i%3 == 0:    
@@ -423,29 +497,73 @@ def MaliceReport(optimizer, config, performance, lam, seed, image_dir):
             pdf.ln(0.1)
         pdf.set_font('DejaVu','B',12)
         pdf.cell(3, 12/72, txt='Residue '+str(residue), ln=1, align='L')
-        #pdf.ln(18/72)
-                
-        ## Generate the simulated spectra based on MaLICE parameter estimates
+        
         residue_data = optimizer.data.loc[optimizer.data.residue == residue,['15N','1H']]
         residue_ref = optimizer.reference[optimizer.reference.residue == residue]
         
-        optimizer.mode = 'pfitter'
-        fit_points = optimizer.fitness()
         residue_fits = fit_points[fit_points.residue == residue]
-        optimizer.mode = 'lfitter'
-        regression = optimizer.fitness()
         residue_regression = regression[regression.residue == residue]
-        optimizer.mode = 'simulated_peak_generation'
-        regression_at_tit_concs = optimizer.fitness()
+        residue_lower_regression = lower_cl_regression[lower_cl_regression.residue == residue]
+        residue_upper_regression = upper_cl_regression[upper_cl_regression.residue == residue]
+        
+        
+        # Add the regression lines for both the intensity and csp fits
+        titrant_rng = fit_points.titrant.max()-fit_points.titrant.min()
+        xl = [np.min(fit_points.titrant)-0.05*titrant_rng, np.max(fit_points.titrant)+0.05*titrant_rng]  
+        csp_rng = np.max(fit_points.csp)-np.min(fit_points.csp)
+        yl_csp = [np.min(fit_points.csp)-0.08*csp_rng, np.max(fit_points.csp)+0.08*csp_rng]
+        int_rng = np.max(fit_points.intensity)-np.min(fit_points.intensity)
+        yl_int = [np.min(fit_points.intensity)-0.08*int_rng, np.max(fit_points.intensity)+0.08*int_rng]
+        
+        
+        yaxes = [yl_csp, yl_int]
+        ylabels = ['CSP (ppm)', 'Intensity']
+        points = ['csp', 'intensity']
+        lines = ['csfit', 'ifit']
+        errors = [optimizer.ml_model[5]/optimizer.larmor, optimizer.ml_model[4]]
+        file_names = ['cs_regression_residue_', 'intensity_regression_residue_']
+        
+        fig, ax = plt.subplots(nrows=2, figsize=(2.5,3.1))
+        color_index = [plasma_titrant[titrant_concs.index(x)] for x in residue_fits.titrant]
+        for i in range(2):
+            #ax[i].scatter('tit', points[i], data=residue_fits, color='black', s=10, zorder=3)
+            ax[i].scatter('titrant', points[i], data=residue_fits, c=color_index, s=32, linewidths=1, edgecolors='black', zorder=5)
+            ax[i].errorbar('titrant', points[i], data=residue_fits, yerr=errors[i], color='black', fmt='none', s=16, zorder=4)
+            ax[i].plot('titrant', lines[i], data=residue_regression, color='black', zorder=3)
+            ax[i].plot('titrant',lines[i], data=residue_lower_regression, color='black', linestyle='dashed', zorder=2)
+            ax[i].plot('titrant',lines[i], data=residue_upper_regression, color='black', linestyle='dashed', zorder=2)
+            ax[i].fill_between(residue_lower_regression.titrant, residue_lower_regression[lines[i]], residue_upper_regression[lines[i]], color=[cm.Greys_r(0.8)], zorder=1)
+            ax[i].set(xlim=xl, ylim=yaxes[i])
+            ax[i].set_xlabel('Titrant (μM)', fontsize=8)
+            ax[i].set_ylabel(ylabels[i], fontsize=8)
+            ax[i].yaxis.offsetText.set_fontsize(7)
+            ax[i].tick_params(labelsize=7)
+            
+            # Calculate R^2
+            #R2 = (np.var(residue_fits[points[i]]) - np.var(residue_fits[points[i]]-residue_fits[lines[i]]))/np.var(residue_fits[points[i]])
+            #ss_total = np.sum( np.square( residue_fits[points[i]] - np.mean(residue_fits[points[i]]) ) )
+            #ss_residual = np.sum( np.square(residue_fits[points[i]]-residue_fits[lines[i]]) )
+            #R2 = 1 - ss_residual/ss_total
+            slope, intercept, r_value, p_value, std_err = stats.linregress(residue_fits[points[i]],residue_fits[lines[i]])
+            ax[i].text(xl[0]+0.05*(xl[1]-xl[0]), yaxes[i][1]-0.15*(yaxes[i][1]-yaxes[i][0]), 'r = '+format(r_value,'.2f'),fontsize=7)
+        fig.tight_layout(pad=0.3,h_pad=0.1)
+        #fig_path = os.path.join(image_dir,file_names[i]+str(residue)+'.png')
+        fig_path = os.path.join(image_dir,'regression_lines_residue_'+str(residue)+'.png')
+        fig.savefig(fig_path, dpi=300)
+        plt.close(fig)
+            
+        pdf.image(fig_path, x=pdf.get_x(), y=pdf.get_y(), w=2.5, h=3.1)
         
         
         
-        #residue_fits['nh_csp_sum'] = (residue_fits['1H']-residue_fits['1H_ref']) + optimizer.nh_scale*(residue_fits['15N']-residue_fits['15N_ref'])
         
+        
+        ## Generate the simulated spectra based on CompLEx parameter estimates
+                
         def theta_estimator(fit_csp, theta):
             return fit_csp*np.sqrt((np.square(np.cos(theta))+np.square(np.sin(theta))))
         
-        est, covar = curve_fit(theta_estimator, residue_fits.csfit, residue_fits.csp)
+        est, covar = curve_fit(theta_estimator, residue_fits.csfit, residue_fits.csp, bounds=((0,np.pi/2)))
         
         mean_delta_1H = np.mean( residue_fits['1H']-residue_fits['1H_ref'] )
         mean_delta_15N = np.mean( residue_fits['15N']-residue_fits['15N_ref'] )
@@ -457,52 +575,67 @@ def MaliceReport(optimizer, config, performance, lam, seed, image_dir):
         
         # Add the simulated spectrum figure
         figure_name = generate_sim_spectrum(optimizer, 
-                                            regression_at_tit_concs, 
+                                            regression_at_titrant_concs, 
                                             optimizer.larmor, 
                                             residue,
-                                            theta, 
+                                            theta,
+                                            covar[0],
+                                            titrant_concs,
+                                            plasma_titrant, 
                                             image_dir)
-        pdf.image(os.path.join(image_dir,figure_name), x = pdf.get_x(), y=pdf.get_y(),
-              w = 3, h = 3)
+        pdf.image(os.path.join(image_dir,figure_name), x = pdf.get_x()+2.5, y=pdf.get_y(),
+              w = 3.1, h = 3.1)
+        
+        
+        ## Add relevant text detailing fits of each residue
+        pdf.ln(0.2)
+        pdf.set_x(pdf.get_x()+5.7)
+        pdf.set_font('DejaVu','I',8)
+        pdf.cell(1.5, 8/72, txt = '# of observed titration points:', ln=0, align='L')
+        pdf.set_font('DejaVu','B',8)
+        pdf.cell(0.2, 8/72, txt = str(len(residue_fits)), ln=1, align='R')
+        pdf.ln(10/72)
+        
+        res_data = optimizer.data.copy()[optimizer.data.residue == residue]
+        original_ref = res_data[res_data.titrant == np.min(res_data.titrant)]
+        current_ref = optimizer.reference.loc[optimizer.reference.residue == residue]
+        reference_text = ( ('15N (ppm)', format(float(current_ref['15N_ref']),'.3f'),
+                            format(float(original_ref['15N'])-float(current_ref['15N_ref']),'.3f')),
+                           ('1H (ppm)', format(float(current_ref['1H_ref']),'.3f'),
+                            format(float(original_ref['1H'])-float(current_ref['1H_ref']),'.3f')),
+                           ('Intensity', format(float(current_ref['I_ref']),'.2g'),
+                            format(float(original_ref['intensity'])-float(current_ref['I_ref']),'.2g')) )
+        
+        pdf.set_x(pdf.get_x()+5.7)
+        pdf.set_font('DejaVu','I',9)
+        pdf.cell(2.8, 10/72, txt = 'Reference peak:', ln=1, align='L')
+        for name, value, change in reference_text:
+            pdf.set_x(pdf.get_x()+5.7)
+            pdf.set_font('DejaVu','I',7)
+            pdf.cell(0.55, 7/72, txt = '    '+name, ln=0, align='L')
+            pdf.set_font('DejaVu','B',7)
+            pdf.cell(0.6, 7/72, txt = value, ln=0, align='R')
+            if np.sign(float(change)) > 0: sign = '+'
+            else:   sign = ''
+            pdf.cell(0.65, 7/72, txt = '('+sign+change+')', ln=1, align='R')
+        pdf.ln(10/72)
         
         
         
+        pdf.set_x(pdf.get_x()+5.7+0.25+0.50)
+        pdf.set_font('DejaVu','I',8)
+        pdf.cell(0.50, 9/72, txt = format(alpha_l,'.1%')+' CL', ln=0, align='C')
+        pdf.cell(0.50, 9/72, txt = format(alpha_u,'.1%')+' CL', ln=1, align='C')
+        pdf.set_x(pdf.get_x()+5.7)
+        pdf.cell(0.25, 9/72, txt = 'Δω (Hz):', ln=0, align='L')
+        pdf.set_font('DejaVu','B',8)
+        pdf.cell(0.50, 9/72, txt = format(float(residue_dw_df.loc[residue_dw_df.residue == residue, 'dw']),'.1f'), ln=0, align='R')
+        pdf.cell(0.50, 9/72, txt = format(float(residue_dw_df.loc[residue_dw_df.residue == residue, 'lower']),'.1f'), ln=0, align='C')
+        pdf.cell(0.50, 9/72, txt = format(float(residue_dw_df.loc[residue_dw_df.residue == residue, 'upper']),'.1f'), ln=1, align='C')
         
         
-        # Add the regression lines for both the intensity and csp fits
-        tit_rng = fit_points.tit.max()-fit_points.tit.min()
-        xl = [np.min(fit_points.tit)-0.01*tit_rng, np.max(fit_points.tit)+0.01*tit_rng]
-        csp_rng = np.max(fit_points.csp)-np.min(fit_points.csp)
-        yl_csp = [np.min(fit_points.csp)-0.05*csp_rng, np.max(fit_points.csp)+0.05*csp_rng]
-        int_rng = np.max(fit_points.intensity)-np.min(fit_points.intensity)
-        yl_int = [np.min(fit_points.intensity)-0.05*int_rng, np.max(fit_points.intensity)+0.05*int_rng]
         
-        yaxes = [yl_csp, yl_int]
-        ylabels = ['CSP (ppm)', 'Intensity']
-        points = ['csp', 'intensity']
-        lines = ['csfit', 'ifit']
-        errors = [optimizer.ml_model[5]/optimizer.larmor, optimizer.ml_model[4]]
-        file_names = ['cs_regression_residue_', 'intensity_regression_residue_']
-        
-        fig, ax = plt.subplots(nrows=2, figsize=(2.5,3.1))
-        for i in range(2):
-            ax[i].scatter('tit', points[i], data=residue_fits, color='black', s=10)
-            ax[i].errorbar('tit', points[i], data=residue_fits, yerr=errors[i], color='black', fmt='none', s=16)
-            ax[i].plot('tit', lines[i], data=residue_regression, color='black')
-            ax[i].set(xlim=xl, ylim=yaxes[i])
-            ax[i].set_xlabel('Titrant (μM)', fontsize=8)
-            ax[i].set_ylabel(ylabels[i], fontsize=8)
-            ax[i].yaxis.offsetText.set_fontsize(7)
-            ax[i].tick_params(labelsize=7)
-        fig.tight_layout(pad=0.3,h_pad=0.1)
-        #fig_path = os.path.join(image_dir,file_names[i]+str(residue)+'.png')
-        fig_path = os.path.join(image_dir,'regression_lines_residue_'+str(residue)+'.png')
-        fig.savefig(fig_path, dpi=300)
-        plt.close(fig)
-            
-        pdf.image(fig_path, x=pdf.get_x()+3, y=pdf.get_y(), w=2.5, h=3.1)
-        
-        pdf.ln(3.1)
+        pdf.ln(1.8)
             
         
         

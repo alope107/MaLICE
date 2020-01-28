@@ -18,7 +18,7 @@ import nmrglue as ng
 import pickle
 
 from malice.optimizer import MaliceOptimizer
-from malice.reporter import MaliceReport
+from malice.reporter import CompLEx_Report
 
 def _parse_args():
     parser = argparse.ArgumentParser()
@@ -36,11 +36,11 @@ def _parse_args():
     parser.add_argument('--bootstraps',
                         type=int,
                         help='Number of bootstraps to perform',
-                        default=25)
+                        default=0)
     parser.add_argument('--confidence',
                         type=float,
                         help='Confidence interval to report for parameter estimates',
-                        default=0.8)
+                        default=0.95)
     parser.add_argument('--larmor',
                         type=float,
                         help="Larmor frequency (MHz) of 1H in the given magnetic field.",
@@ -56,7 +56,7 @@ def _parse_args():
     parser.add_argument('--phase1_generations',
                         type=int,
                         help='PyGMO phase 1 generations per evolution cycle',
-                        default=1000)
+                        default=1500)
     parser.add_argument('--phase1_evo_rounds',
                         type=int,
                         help='PyGMO phase 1 rounds of evolution',
@@ -77,6 +77,18 @@ def _parse_args():
                         type=int,
                         help='PyGMO number of generations per bootstrap',
                         default=3000)
+    parser.add_argument('--mcmc_walks',
+                        type=int,
+                        help='Number of MCMC walks to perform for confidence interval calculation',
+                        default=50)
+    parser.add_argument('--mcmc_steps',
+                        type=int,
+                        help='Maximum number of steps per MCMC walk for confidence interval calculation',
+                        default=10000)
+    parser.add_argument('--num_threads',
+                        type=int,
+                        help='Number of threads to parallelize MCMC walks',
+                        default=10)
     parser.add_argument('--seed',
                         type=int,
                         help='initial seed for PyGMO (not deterministic, but gets closer)',
@@ -85,9 +97,9 @@ def _parse_args():
                         type=float,
                         help='PyGMO tolerance for both ftol and xtol',
                         default='1e-8')
-    parser.add_argument('--observable',
+    parser.add_argument('--visible',
                         type=str,
-                        help='Name of the observable protein',
+                        help='Name of the NMR visible protein',
                         default='Sample protein 15N')
     parser.add_argument('--titrant',
                         type=str,
@@ -100,7 +112,7 @@ def gen_pop1(optimizer):
     Kd_exp_random = list(np.random.random(1)*5-1)   # Will span from 100 nM to 10 mM
     kex_exp_random = list(np.random.random(1)*4+3)  # Will span from 1 kHz to 10 Mhz
     dR2_random = list(np.random.random(1)*200)            # 0 - 200 Hz
-    amp_random = [np.random.normal(np.mean(optimizer.data.intensity),np.std(optimizer.data.intensity)) * 20]
+    amp_scaler_random = [np.random.normal(np.mean(optimizer.data.intensity),np.std(optimizer.data.intensity)) * 20]
         # random amp logic is that since amp = intensity * lw, lets just randomly sample something from the reasonable intensity
         # range and multiply by 20, which is probably a decent enough guess of typical protein linewidths
     i_noise_random = list(np.mean(optimizer.data.intensity)/(np.random.random(1)*46+4)) # 1/4 to 1/50th of mean intensity
@@ -108,7 +120,7 @@ def gen_pop1(optimizer):
 
     dw_random = list( 0.1*optimizer.larmor * np.random.random(len(optimizer.residues)) ) ## Every delta_w is 0-0.1 ppm CSP
 
-    return Kd_exp_random + kex_exp_random + dR2_random + amp_random + i_noise_random + cs_noise_random + dw_random
+    return Kd_exp_random + kex_exp_random + dR2_random + amp_scaler_random + i_noise_random + cs_noise_random + dw_random
 
 def gen_pop2(optimizer):
     N_random = list( np.array(optimizer.reference['15N_ref']) + np.random.normal(0,optimizer.l1_model[5]/optimizer.nh_scale,len(optimizer.residues)) )
@@ -137,16 +149,16 @@ def pygmo_wrapper(optimizer,pop_generator,seed,islands,pop_size,generations,evo_
     return best_model, best_score
 
 def gen_bspop(optimizer):
-    Kd_exp_pert = [optimizer.ml_model[0] + np.random.normal(0,0.1)]
-    kex_exp_pert = [optimizer.ml_model[1] + np.random.normal(0,0.1)]
+    Kd_exp_pert = [optimizer.ml_model[0] + np.random.normal(0,0.2)]
+    kex_exp_pert = [optimizer.ml_model[1] + np.random.normal(0,0.2)]
     dR2_pert = [optimizer.ml_model[2] + np.random.normal(0,1)]
-    amp_pert = [optimizer.ml_model[3] + np.random.normal(0,optimizer.ml_model[3]/20)]
-    i_noise_pert = [optimizer.ml_model[4] + np.random.normal(0,optimizer.ml_model[4]/20)]
-    cs_noise_pert = [optimizer.ml_model[5] + np.random.normal(0,optimizer.ml_model[5]/20)]
+    amp_scaler_pert = [optimizer.ml_model[3] + np.random.normal(0,optimizer.ml_model[3]/10)]
+    i_noise_pert = [optimizer.ml_model[4] + np.random.normal(0,optimizer.ml_model[4]/10)]
+    cs_noise_pert = [optimizer.ml_model[5] + np.random.normal(0,optimizer.ml_model[5]/10)]
     
-    dw_pert = list(np.array(optimizer.ml_model[optimizer.gvs:]) + np.random.normal(0,1,len(optimizer.residues)))
+    dw_pert = list(np.array(optimizer.ml_model[optimizer.gvs:]) + np.random.normal(0,3,len(optimizer.residues)))
 
-    return Kd_exp_pert + kex_exp_pert + dR2_pert + amp_pert + i_noise_pert + cs_noise_pert + dw_pert
+    return Kd_exp_pert + kex_exp_pert + dR2_pert + amp_scaler_pert + i_noise_pert + cs_noise_pert + dw_pert
 
 def bootstrapper(optimizer,seed,pop_size,bootstrap_num,bootstrap_gen,tolerance):
     min_bs = [optimizer.ml_model[0]-1, optimizer.ml_model[1]-1, optimizer.ml_model[2]-20, optimizer.ml_model[3]/4, 
@@ -185,8 +197,58 @@ def truncate_colormap(cmap, minval=0.0, maxval=1.0, n=100):
         cmap(np.linspace(minval, maxval, n)))
     return new_cmap
 
-
-
+def mcmc_walker(optimizer, steps, confidence, min_global, max_global, seed, iterator=1, abort_threshold = 100):
+    
+    np.random.seed(seed = 9*seed + 89*iterator)
+    
+    walker = MaliceOptimizer(larmor = optimizer.larmor,
+                             gvs = optimizer.gvs,
+                             data = optimizer.data,
+                             mode = 'ml_optimization',
+                             nh_scale = optimizer.nh_scale,
+                             l1_model = optimizer.l1_model,
+                             reference = optimizer.reference,
+                             ml_model = optimizer.ml_model)
+    
+    min_mcmc = [walker.ml_model[0]-1, walker.ml_model[1]-1, walker.ml_model[2]-20, walker.ml_model[3]/4, 
+                walker.ml_model[4]/4, walker.ml_model[5]/4] + [0]*(len(walker.ml_model)-walker.gvs)
+    max_mcmc = [walker.ml_model[0]+1, walker.ml_model[1]+1, walker.ml_model[2]+20, walker.ml_model[3]*4, 
+                walker.ml_model[4]*4, walker.ml_model[5]*4] + [max(walker.ml_model[walker.gvs:])*5]*(len(walker.ml_model)-walker.gvs)
+    
+    # Fix any of the global bounds that go off into stupid places
+    for i in range(walker.gvs):
+        if min_mcmc[i] < min_global[i]:    min_mcmc[i] = min_global[i]
+        if max_mcmc[i] > max_global[i]:    max_mcmc[i] = max_global[i]
+    
+    tolerated_negLL = walker.fitness(walker.ml_model)[0] + stats.chi2.ppf(confidence,df=1)/2
+    
+    model = list(walker.ml_model)
+    accepted_steps = []
+    consecutive_failed = 0
+    for i in range(steps):
+        prev_model = list(model)
+        
+        # For global variables, allow it to walk randomly -/+ 0.4% and dw to move randomly -/+ 0.1 Hz
+        perturbation = list((np.random.random(walker.gvs)-0.5)/125*np.array(model[:walker.gvs])) + list((np.random.random(len(model[walker.gvs:]))-0.5)/5)
+        model = list(np.array(model) + perturbation)
+        
+        #Check bounds
+        for j in range(len(model)):
+            if model[j] < min_mcmc[j]:  model[j] = min_mcmc[j]
+            if model[j] > max_mcmc[j]:  model[j] = max_mcmc[j]
+        
+        if walker.fitness(model)[0] <= tolerated_negLL:
+            accepted_steps.append(list(model))
+            consecutive_failed = 0
+        else:
+            model = list(prev_model)
+            consecutive_failed += 1
+        
+        if consecutive_failed > abort_threshold:    break
+        
+    print('Walk #'+str(iterator+1)+': Accepted '+str(len(accepted_steps))+' of '+str(i+1)+' steps')
+    
+    return accepted_steps
 
 
 
@@ -229,7 +291,7 @@ def parse_input(fname, larmor, nh_scale):
     input = pd.read_csv(fname,
                         dtype = {'residue':np.int64,'15N':np.float64,
                                  '1H':np.float64,'intensity':np.float64,
-                                 'tit':np.float64,'obs':np.float64})
+                                 'titrant':np.float64,'visible':np.float64})
     data = input.copy()
     
     residues = list(data.groupby('residue').groups.keys())
@@ -237,8 +299,8 @@ def parse_input(fname, larmor, nh_scale):
     for res in residues:
         resdata = data.copy()[data.residue == res]
         ## Use the lowest titration point (hopefully zero) for the reference
-        min_titrant_conc = resdata.tit.min()
-        reference_points = reference_points.append(resdata.loc[resdata.tit == min_titrant_conc,['residue','15N','1H','intensity']])
+        min_titrant_conc = resdata.titrant.min()
+        reference_points = reference_points.append(resdata.loc[resdata.titrant == min_titrant_conc,['residue','15N','1H','intensity']])
         #resgrouped = resgrouped.append(resdata.loc[resdata.intensity == np.max(resdata.intensity),['residue','15N','1H','intensity']])
     
     return data, reference_points, residues
@@ -252,7 +314,7 @@ def run_malice(config):
     ## Important variables
     larmor = config.larmor
     gvs = 6
-    lam = 0.01
+    lam = 0.012
     nh_scale = 0.2  # Consider reducing to ~0.14
     
     pygmo_seed = 2*config.seed - 280
@@ -295,7 +357,7 @@ def run_malice(config):
     print('\n\tKd = '+str(round(np.power(10,optimizer.l1_model[0]),2))+
           '\n\tkoff = '+str(round(np.power(10,optimizer.l1_model[1]),2))+
           '\n\tdR2 = '+str(round(optimizer.l1_model[2],2))+
-          '\n\tAmp = '+str(round(optimizer.l1_model[3],2))+
+          '\n\tAmp_scaler = '+str(round(optimizer.l1_model[3],2))+
           '\n\tInoise = '+str(round(optimizer.l1_model[4],2))+
           '\n\tCSnoise = '+str(round(optimizer.l1_model[5],2))+
           '\n\tMax dw = '+str(round(np.max(optimizer.l1_model[gvs:]),2)))
@@ -402,7 +464,7 @@ def run_malice(config):
     optimizer.mode = 'ml_optimization'
     
     # Bounds
-    '''
+    
     ml_opt_bounds_min = [scaled_dw_opt.x[0]-0.2, scaled_dw_opt.x[1]-0.2, scaled_dw_opt.x[2]-10, scaled_dw_opt.x[3]/1.2,
                  scaled_dw_opt.x[4]/1.2, scaled_dw_opt.x[5]/1.2] + [0]*len(residues)
     ml_opt_bounds_max = [scaled_dw_opt.x[0]+0.2, scaled_dw_opt.x[1]+0.2, scaled_dw_opt.x[2]+10, scaled_dw_opt.x[3]*1.2,
@@ -412,8 +474,8 @@ def run_malice(config):
         if ml_opt_bounds_min[i] < l1_bounds_min[i]:    ml_opt_bounds_min[i] = l1_bounds_min[i]
         if ml_opt_bounds_max[i] > l1_bounds_max[i]:    ml_opt_bounds_max[i] = l1_bounds_max[i]
     optimizer.set_bounds((ml_opt_bounds_min,ml_opt_bounds_max))
-    '''
-    optimizer.set_bounds((l1_bounds_min,l1_bounds_max))
+    
+    #optimizer.set_bounds((l1_bounds_min,l1_bounds_max))
     
     ml_opt_initial = list(scaled_dw_opt.x[:gvs]) + list(np.array(optimizer.l1_model[gvs:])*dw_scaler)
     
@@ -431,15 +493,15 @@ def run_malice(config):
     print('\n\tKd = '+str(round(np.power(10,optimizer.ml_model[0]),2))+
           '\n\tkoff = '+str(round(np.power(10,optimizer.ml_model[1]),2))+
           '\n\tdR2 = '+str(round(optimizer.ml_model[2],2))+
-          '\n\tAmp = '+str(round(optimizer.ml_model[3],2))+
+          '\n\tAmp_scaler = '+str(round(optimizer.ml_model[3],2))+
           '\n\tInoise = '+str(round(optimizer.ml_model[4],2))+
           '\n\tCSnoise = '+str(round(optimizer.ml_model[5],2))+
           '\n\tMax dw = '+str(round(np.max(optimizer.ml_model[gvs:]),2)))
 
     dfs = pd.DataFrame({'residue':residues,'dw':optimizer.ml_model[gvs:]/larmor})
     ## Print out data
-    csv_name = os.path.join(config.output_dir, fname_prefix + '_MaLICE_fits.csv')
-    txt_name = os.path.join(config.output_dir, fname_prefix+'_MaLICE_deltaw.txt')
+    csv_name = os.path.join(config.output_dir, fname_prefix + '_CompLEx_fits.csv')
+    txt_name = os.path.join(config.output_dir, fname_prefix+'_CompLEx_deltaw.txt')
     dfs.to_csv(csv_name,index=False)
     dfs[['residue','dw']].to_csv(txt_name, index=False,header=False)
     
@@ -454,28 +516,33 @@ def run_malice(config):
     optimizer.mode = 'pfitter'
     mleoutput = optimizer.fitness()
     
-    tit_rng = fit_data.tit.max()-fit_data.tit.min()
-    xl = [np.min(fit_data.tit)-0.01*tit_rng, np.max(fit_data.tit)+0.01*tit_rng]
+    titrant_rng = fit_data.titrant.max()-fit_data.titrant.min()
+    xl = [np.min(fit_data.titrant)-0.01*titrant_rng, np.max(fit_data.titrant)+0.01*titrant_rng]
     csp_rng = np.max(mleoutput.csp)-np.min(mleoutput.csp)
     yl_csp = [np.min(mleoutput.csp)-0.05*csp_rng, np.max(mleoutput.csp)+0.05*csp_rng]
     int_rng = np.max(mleoutput.intensity)-np.min(mleoutput.intensity)
     yl_int = [np.min(mleoutput.intensity)-0.05*int_rng, np.max(mleoutput.intensity)+0.05*int_rng]
 
-    pdf_name = os.path.join(config.output_dir, fname_prefix + '_MaLICE_fits.pdf')
+    pdf_name = os.path.join(config.output_dir, fname_prefix + '_CompLEx_fits.pdf')
     with PdfPages(pdf_name) as pdf:
         for residue in residues:
             fig, ax = plt.subplots(ncols=2,figsize=(7.5,2.5))
-            ax[0].scatter('tit','csp',data=mleoutput[mleoutput.residue == residue],color='black',s=10)
-            ax[0].errorbar('tit','csp',data=mleoutput[mleoutput.residue == residue],yerr=optimizer.ml_model[5]/larmor,color='black',fmt='none',s=16)
-            ax[0].plot('tit','csfit',data=fit_data[fit_data.residue == residue])
-            ax[1].scatter('tit','intensity',data=mleoutput[mleoutput.residue == residue],color='black',s=10)
-            ax[1].errorbar('tit','intensity',data=mleoutput[mleoutput.residue == residue],yerr=optimizer.ml_model[4],color='black',fmt='none',s=16)
-            ax[1].plot('tit','ifit',data=fit_data[fit_data.residue == residue])
+            ax[0].scatter('titrant','csp',data=mleoutput[mleoutput.residue == residue],color='black',s=10)
+            ax[0].errorbar('titrant','csp',data=mleoutput[mleoutput.residue == residue],yerr=optimizer.ml_model[5]/larmor,color='black',fmt='none',s=16)
+            ax[0].plot('titrant','csfit',data=fit_data[fit_data.residue == residue])
+            ax[1].scatter('titrant','intensity',data=mleoutput[mleoutput.residue == residue],color='black',s=10)
+            ax[1].errorbar('titrant','intensity',data=mleoutput[mleoutput.residue == residue],yerr=optimizer.ml_model[4],color='black',fmt='none',s=16)
+            ax[1].plot('titrant','ifit',data=fit_data[fit_data.residue == residue])
             ax[0].set(xlim=xl, ylim=yl_csp, xlabel='Titrant (μM)', ylabel='CSP (ppm)', title='Residue '+str(residue)+' CSP')
             ax[1].set(xlim=xl, ylim=yl_int, xlabel='Titrant (μM)', ylabel='Intensity', title='Residue '+str(residue)+' Intensity')
             fig.tight_layout()
             pdf.savefig()
             plt.close()
+    
+    
+    
+    
+    
     
     
     
@@ -490,7 +557,7 @@ def run_malice(config):
                                 tolerance = config.tolerance)
     
         #Test out reporting of confidence intervals using global parameters
-        global_params = ['Kd_exp','koff_exp','dR2','Amp','I_noise','CS_noise']
+        global_params = ['Kd_exp','koff_exp','dR2','Amp_scaler','I_noise','CS_noise']
         
         alpha_l = (1-config.confidence)/2
         lower_bs = int( np.round(alpha_l*config.bootstraps) )
@@ -580,10 +647,105 @@ def run_malice(config):
             
             print('\t'+global_params[k]+' = '+str(round(optimizer.ml_model[k],2))+' ['+str(round(lower_cl,2))+','+str(round(upper_cl,2))+']\n')
         '''
-        performance['phase4_time'] = time.time() - performance['start_time']
-        performance['current_time'] = time.time() - performance['start_time']
-        print('\n\tCurrent run time = '+str(datetime.timedelta(seconds=performance['current_time'])).split('.')[0])
         
+    
+    ## Calculate the likelihood based confidence intervals
+    else:   #boostraps == 0
+        optimizer.mode = 'ml_optimization'
+        lower_conf_limits = []
+        upper_conf_limits = []
+        '''
+        for i in range(len(optimizer.ml_model)):
+            # Decrease and increase the parameter by 0.1% until we hit the critical value of 1.92 for 95% confidence
+            scaler = 1.0
+            params = optimizer.ml_model
+            while optimizer.fitness(params)[0] - performance['ml_model_score'] <= stats.chi2.ppf(config.confidence,df=1)/2:
+                params[i] = optimizer.ml_model[i]*scaler
+                scaler-=0.001
+            lower_conf_limits.append(params[i])
+            
+            scaler = 1.0
+            params = optimizer.ml_model
+            while optimizer.fitness(params)[0] - performance['ml_model_score'] <= stats.chi2.ppf(config.confidence,df=1)/2:
+                params[i] = optimizer.ml_model[i]*scaler
+                scaler+=0.001
+            upper_conf_limits.append(params[i])
+        '''
+        
+        ## Set up a MCMC walk within the parameter space
+        # Let's start with 10 random walks of 10K steps
+        walks = 50
+        
+        # Set this up now using the mcmc function
+        executor = concurrent.futures.ProcessPoolExecutor(config.num_threads)
+        futures = [executor.submit(mcmc_walker, optimizer, config.mcmc_steps, config.confidence, l1_bounds_min, l1_bounds_max, config.seed, k) for k in range(config.mcmc_walks)]
+        concurrent.futures.wait(futures)
+
+        
+        accepted_steps = []
+        for future in futures:   accepted_steps += future.result()
+        
+        '''
+        walk_length = 10000
+        accepted_steps = []
+        for i in range(walks):
+            model = list(optimizer.ml_model)
+            counter = 0
+            consecutive_failed = 0
+            for j in range(walk_length):
+                prev_model = list(model)
+                
+                model[0]+=np.random.normal(0,0.005)
+                model[1]+=np.random.normal(0,0.005)
+                model[2]+=np.random.normal(0,0.1)
+                model[3]+=np.random.normal(0,model[3]/100)
+                model[4]+=np.random.normal(0,model[4]/100)
+                model[5]+=np.random.normal(0,model[5]/100)
+                model[gvs:] = list(np.array(model[gvs:]) + np.random.normal(0,0.1,len(model[gvs:])))
+               
+                
+
+                # For global variables, allow it to walk randomly -/+ 0.1% and dw to move randomly -/+ 0.1 Hz
+                perturbation = list((np.random.random(gvs)-0.5)/500*np.array(model[:gvs])) + list((np.random.random(len(model[gvs:]))-0.5)/5)
+                model = list(np.array(model) + perturbation)
+                
+                #model[:gvs] = np.array(model[:gvs]) + (np.random.random(gvs)-0.5)/500*np.array(model[:gvs])
+                # Allow movement of dw to be randomly -/+ 0.1 Hz
+                #model[gvs:] = np.array(model[gvs:]) + (np.random.random(len(model[gvs:]))-0.5)/5
+                
+                if optimizer.fitness(model)[0] - performance['ml_model_score'] <= stats.chi2.ppf(config.confidence,df=1)/2:
+                    accepted_steps.append(list(model))
+                    counter+=1
+                    consecutive_failed = 0
+                else:
+                    model = list(prev_model)
+                    consecutive_failed += 1
+                
+                if consecutive_failed > 50: break
+            print('Walk #'+str(i+1)+': Accepted '+str(counter)+' of '+str(j+1)+' steps')
+        '''
+        
+        
+        
+        for i in range(len(optimizer.ml_model)):
+            param = [x[i] for x in accepted_steps]
+            #print(param)
+            if len(param) > 0:
+                lower_conf_limits.append(min(param))
+                upper_conf_limits.append(max(param))
+            else:
+                lower_conf_limits.append(-1)
+                upper_conf_limits.append(-1)
+            
+        #print(lower_conf_limits)
+        
+        optimizer.ml_model_stderrs = list(optimizer.ml_model) #JUST STICKING NUMBERS IN FOR NOW
+        optimizer.lower_conf_limits = list(lower_conf_limits)
+        optimizer.upper_conf_limits = list(upper_conf_limits)
+    
+    performance['phase4_time'] = time.time() - performance['start_time']
+    performance['current_time'] = time.time() - performance['start_time']
+    print('\n\tCurrent run time = '+str(datetime.timedelta(seconds=performance['current_time'])).split('.')[0])
     
     ## Generate summary PDF
     
@@ -593,12 +755,12 @@ def run_malice(config):
     image_dir = os.path.join(config.output_dir,'images')
     make_output_dir( image_dir )
     
-    summary_pdf = MaliceReport(optimizer, config, performance, lam, pygmo_seed, image_dir)
-    summary_pdf_name = os.path.join(config.output_dir, fname_prefix + '_MaLICE_summary.pdf')
+    summary_pdf = CompLEx_Report(optimizer, config, performance, lam, pygmo_seed, image_dir)
+    summary_pdf_name = os.path.join(config.output_dir, fname_prefix + '_CompLEx_summary.pdf')
     summary_pdf.output(summary_pdf_name)
     
     
-    ## Dump out data so I can keep testing the MaliceReport function without running MaLICE
+    ## Dump out data so I can keep testing the CompLExReport function without running MaLICE
     '''
     data_dir = os.path.join(config.output_dir,'data')
     pickle.dump(optimizer, os.path.join(data_dir,'optimizer'))
