@@ -290,8 +290,8 @@ def CompLEx_Report(optimizer, config, performance, lam, seed, image_dir):
                        ('Phase 2 generations', config.phase2_generations),
                        ('Phase 2 rounds of evolution', config.phase2_evo_rounds),
                        ('Population size', config.pop_size),
-                       ('Bootstrap replicates', config.bootstraps),
-                       ('Bootstrap generations', config.bootstrap_generations),
+                       ('MCMC walks', config.mcmc_walks),
+                       ('MCMC steps', config.mcmc_steps),
                        ('Founder seed', seed),
                        ('PyGMO tolerance', format(config.tolerance, '.1g')),
                        ('Least squares max iterations', format(config.least_squares_max_iter,'.1g'))]
@@ -341,20 +341,7 @@ def CompLEx_Report(optimizer, config, performance, lam, seed, image_dir):
     pdf.set_line_width(1/72)
     #pdf.set_fill_color(255, 255, 255)
     pdf.rect(curr_x, pdf.get_y()-0.02, 4*width+0.02,(12+7*10)/72+0.10, 'D')
-    ''' 
-    global_variables_text = (('Kd (uM)', format(np.power(10,optimizer.ml_model[0]),'.1f'), format(np.power(10,optimizer.ml_model_stderrs[0]),'.1f'),
-                              round(np.power(10,optimizer.lower_conf_limits[0]),1), round(np.power(10,optimizer.upper_conf_limits[0]),1)),
-                             ('koff (Hz)', round(np.power(10,optimizer.ml_model[1]),1), round(np.power(10,optimizer.ml_model_stderrs[1]),1),
-                              round(np.power(10,optimizer.lower_conf_limits[1]),1), round(np.power(10,optimizer.upper_conf_limits[1]),1)),
-                             ('ΔR2 (Hz)', round(optimizer.ml_model[2],2), round(optimizer.ml_model_stderrs[2],2),
-                              round(optimizer.lower_conf_limits[2],2), round(optimizer.upper_conf_limits[2],2)),
-                             ('Amplitude', format(optimizer.ml_model[3],'.2g'), format(optimizer.ml_model_stderrs[3],'.2g'),
-                              format(optimizer.lower_conf_limits[3],'.2g'), format(optimizer.upper_conf_limits[3],'.2g')),
-                             ('Intensity ε', format(optimizer.ml_model[4],'.2g'), format(optimizer.ml_model_stderrs[4],'.2g'),
-                              format(optimizer.lower_conf_limits[4],'.2g'), format(optimizer.upper_conf_limits[4],'.2g')),
-                             ('CS ε (Hz)', round(optimizer.ml_model[5],2), round(optimizer.ml_model_stderrs[5],2), 
-                              round(optimizer.lower_conf_limits[5],2), round(optimizer.upper_conf_limits[5],2)))  
-    '''
+
     global_variables_text = (('Kd (uM)', format(np.power(10,optimizer.ml_model[0]),'.1f'), format(np.power(10,optimizer.lower_conf_limits[0]),'.1f'),
                               format(np.power(10,optimizer.upper_conf_limits[0]),'.1f')),
                              ('koff (Hz)', format(np.power(10,optimizer.ml_model[1]),'.1f'), format(np.power(10,optimizer.lower_conf_limits[1]),'.1f'),
@@ -372,8 +359,6 @@ def CompLEx_Report(optimizer, config, performance, lam, seed, image_dir):
     pdf.cell(width, 10/72, txt='Variable', ln=0, align='L')
     pdf.set_x(curr_x+width)
     pdf.cell(width, 10/72, txt='ML Estimate', ln=0, align='C')
-    #pdf.set_x(curr_x+2*width)
-    #pdf.cell(width, 10/72, txt='Std Error', ln=0, align='C')
     pdf.set_x(curr_x+2*width)
     alpha_l = (1-config.confidence)/2
     alpha_u = 1-alpha_l
@@ -388,8 +373,6 @@ def CompLEx_Report(optimizer, config, performance, lam, seed, image_dir):
         pdf.set_font('DejaVu','B',10)
         pdf.set_x(curr_x+width)
         pdf.cell(width, 10/72, txt = str(mle), ln=0, align='C')
-        #pdf.set_x(curr_x+2*width)
-        #pdf.cell(width, 10/72, txt = str(stderr), ln=0, align='C')
         pdf.set_x(curr_x+2*width)
         pdf.cell(width, 10/72, txt = str(lower_cl), ln=0, align='C')
         pdf.set_x(curr_x+3*width)
@@ -451,10 +434,24 @@ def CompLEx_Report(optimizer, config, performance, lam, seed, image_dir):
     optimizer.mode = 'lfitter'
     regression = optimizer.fitness()
     
-    lower_cl_params = list(optimizer.ml_model[:optimizer.gvs]) + list(optimizer.lower_conf_limits[optimizer.gvs:])
-    lower_cl_regression = optimizer.fitness(lower_cl_params)
-    upper_cl_params = list(optimizer.ml_model[:optimizer.gvs]) + list(optimizer.upper_conf_limits[optimizer.gvs:])
-    upper_cl_regression = optimizer.fitness(upper_cl_params)
+    #lower_cl_params = list(optimizer.ml_model[:optimizer.gvs]) + list(optimizer.lower_conf_limits[optimizer.gvs:])
+    #lower_cl_regression = optimizer.fitness(lower_cl_params)
+    #upper_cl_params = list(optimizer.ml_model[:optimizer.gvs]) + list(optimizer.upper_conf_limits[optimizer.gvs:])
+    #upper_cl_regression = optimizer.fitness(upper_cl_params)
+    
+    
+    lower_cl_csp_params = [optimizer.upper_conf_limits[0]] + list(optimizer.lower_conf_limits[1:])
+    lower_cl_int_params = list(optimizer.upper_conf_limits[:2]) + [optimizer.lower_conf_limits[2], optimizer.upper_conf_limits[3]] + list(optimizer.lower_conf_limits[4:])
+    lower_cl_csp_regression = optimizer.fitness(lower_cl_csp_params)
+    lower_cl_int_regression = optimizer.fitness(lower_cl_int_params)
+    
+    
+    upper_cl_csp_params = [optimizer.lower_conf_limits[0]] + list(optimizer.upper_conf_limits[1:])
+    upper_cl_int_params = list(optimizer.lower_conf_limits[:2]) + [optimizer.upper_conf_limits[2], optimizer.lower_conf_limits[3]] + list(optimizer.upper_conf_limits[4:])
+    upper_cl_csp_regression = optimizer.fitness(upper_cl_csp_params)
+    upper_cl_int_regression = optimizer.fitness(upper_cl_int_params)
+    
+    
         
     optimizer.mode = 'simulated_peak_generation'
     regression_at_titrant_concs = optimizer.fitness()
@@ -503,8 +500,14 @@ def CompLEx_Report(optimizer, config, performance, lam, seed, image_dir):
         
         residue_fits = fit_points[fit_points.residue == residue]
         residue_regression = regression[regression.residue == residue]
-        residue_lower_regression = lower_cl_regression[lower_cl_regression.residue == residue]
-        residue_upper_regression = upper_cl_regression[upper_cl_regression.residue == residue]
+        
+        #residue_lower_regression = lower_cl_regression[lower_cl_regression.residue == residue]
+        #residue_upper_regression = upper_cl_regression[upper_cl_regression.residue == residue]
+        
+        residue_lower_csp_regression = lower_cl_csp_regression[lower_cl_csp_regression.residue == residue]
+        residue_lower_int_regression = lower_cl_int_regression[lower_cl_int_regression.residue == residue]
+        residue_upper_csp_regression = upper_cl_csp_regression[upper_cl_csp_regression.residue == residue]
+        residue_upper_int_regression = upper_cl_int_regression[upper_cl_int_regression.residue == residue]
         
         
         # Add the regression lines for both the intensity and csp fits
@@ -520,6 +523,8 @@ def CompLEx_Report(optimizer, config, performance, lam, seed, image_dir):
         ylabels = ['CSP (ppm)', 'Intensity']
         points = ['csp', 'intensity']
         lines = ['csfit', 'ifit']
+        residue_lower_conf_data = [residue_lower_csp_regression, residue_lower_int_regression]
+        residue_upper_conf_data = [residue_upper_csp_regression, residue_upper_int_regression]
         errors = [optimizer.ml_model[5]/optimizer.larmor, optimizer.ml_model[4]]
         file_names = ['cs_regression_residue_', 'intensity_regression_residue_']
         
@@ -530,9 +535,9 @@ def CompLEx_Report(optimizer, config, performance, lam, seed, image_dir):
             ax[i].scatter('titrant', points[i], data=residue_fits, c=color_index, s=32, linewidths=1, edgecolors='black', zorder=5)
             ax[i].errorbar('titrant', points[i], data=residue_fits, yerr=errors[i], color='black', fmt='none', s=16, zorder=4)
             ax[i].plot('titrant', lines[i], data=residue_regression, color='black', zorder=3)
-            ax[i].plot('titrant',lines[i], data=residue_lower_regression, color='black', linestyle='dashed', zorder=2)
-            ax[i].plot('titrant',lines[i], data=residue_upper_regression, color='black', linestyle='dashed', zorder=2)
-            ax[i].fill_between(residue_lower_regression.titrant, residue_lower_regression[lines[i]], residue_upper_regression[lines[i]], color=[cm.Greys_r(0.8)], zorder=1)
+            ax[i].plot('titrant',lines[i], data=residue_lower_conf_data[i], color='black', linestyle='dotted', zorder=2)
+            ax[i].plot('titrant',lines[i], data=residue_upper_conf_data[i], color='black', linestyle='dotted', zorder=2)
+            ax[i].fill_between(residue_lower_conf_data[i].titrant, residue_lower_conf_data[i][lines[i]], residue_upper_conf_data[i][lines[i]], color=[cm.Greys_r(0.7)], zorder=1)
             ax[i].set(xlim=xl, ylim=yaxes[i])
             ax[i].set_xlabel('Titrant (μM)', fontsize=8)
             ax[i].set_ylabel(ylabels[i], fontsize=8)
@@ -622,16 +627,16 @@ def CompLEx_Report(optimizer, config, performance, lam, seed, image_dir):
         
         
         
-        pdf.set_x(pdf.get_x()+5.7+0.25+0.50)
+        pdf.set_x(pdf.get_x()+5.7+0.34+0.47)
         pdf.set_font('DejaVu','I',8)
-        pdf.cell(0.50, 9/72, txt = format(alpha_l,'.1%')+' CL', ln=0, align='C')
-        pdf.cell(0.50, 9/72, txt = format(alpha_u,'.1%')+' CL', ln=1, align='C')
+        pdf.cell(0.47, 9/72, txt = format(alpha_l,'.1%')+' CL', ln=0, align='C')
+        pdf.cell(0.47, 9/72, txt = format(alpha_u,'.1%')+' CL', ln=1, align='C')
         pdf.set_x(pdf.get_x()+5.7)
-        pdf.cell(0.25, 9/72, txt = 'Δω (Hz):', ln=0, align='L')
+        pdf.cell(0.34, 9/72, txt = 'Δω (Hz):', ln=0, align='L')
         pdf.set_font('DejaVu','B',8)
-        pdf.cell(0.50, 9/72, txt = format(float(residue_dw_df.loc[residue_dw_df.residue == residue, 'dw']),'.1f'), ln=0, align='R')
-        pdf.cell(0.50, 9/72, txt = format(float(residue_dw_df.loc[residue_dw_df.residue == residue, 'lower']),'.1f'), ln=0, align='C')
-        pdf.cell(0.50, 9/72, txt = format(float(residue_dw_df.loc[residue_dw_df.residue == residue, 'upper']),'.1f'), ln=1, align='C')
+        pdf.cell(0.47, 9/72, txt = format(float(residue_dw_df.loc[residue_dw_df.residue == residue, 'dw']),'.1f'), ln=0, align='R')
+        pdf.cell(0.47, 9/72, txt = format(float(residue_dw_df.loc[residue_dw_df.residue == residue, 'lower']),'.1f'), ln=0, align='C')
+        pdf.cell(0.47, 9/72, txt = format(float(residue_dw_df.loc[residue_dw_df.residue == residue, 'upper']),'.1f'), ln=1, align='C')
         
         
         

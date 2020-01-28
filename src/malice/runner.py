@@ -29,14 +29,6 @@ def _parse_args():
                         type=int,
                         help='Population size to perform differential evolution on',
                         default=20)
-    parser.add_argument('--least_squares_max_iter', #TODO: Different maxes for different phases?
-                        type=int,
-                        help='Maximum number of iterations to run sequential least squares minimization',
-                        default=100000)
-    parser.add_argument('--bootstraps',
-                        type=int,
-                        help='Number of bootstraps to perform',
-                        default=0)
     parser.add_argument('--confidence',
                         type=float,
                         help='Confidence interval to report for parameter estimates',
@@ -73,6 +65,10 @@ def _parse_args():
                         type=int,
                         help='PyGMO phase 2 rounds of evolution',
                         default=10)
+    parser.add_argument('--least_squares_max_iter', #TODO: Different maxes for different phases?
+                        type=int,
+                        help='Maximum number of iterations to run sequential least squares minimization',
+                        default=100000)
     parser.add_argument('--bootstrap_generations',
                         type=int,
                         help='PyGMO number of generations per bootstrap',
@@ -159,37 +155,6 @@ def gen_bspop(optimizer):
     dw_pert = list(np.array(optimizer.ml_model[optimizer.gvs:]) + np.random.normal(0,3,len(optimizer.residues)))
 
     return Kd_exp_pert + kex_exp_pert + dR2_pert + amp_scaler_pert + i_noise_pert + cs_noise_pert + dw_pert
-
-def bootstrapper(optimizer,seed,pop_size,bootstrap_num,bootstrap_gen,tolerance):
-    min_bs = [optimizer.ml_model[0]-1, optimizer.ml_model[1]-1, optimizer.ml_model[2]-20, optimizer.ml_model[3]/4, 
-              optimizer.ml_model[4]/4, optimizer.ml_model[5]/4] + [0]*(len(optimizer.ml_model)-optimizer.gvs)
-    max_bs = [optimizer.ml_model[0]+1, optimizer.ml_model[1]+1, optimizer.ml_model[2]+20, optimizer.ml_model[3]*4, 
-              optimizer.ml_model[4]*4, optimizer.ml_model[5]*4] + list(np.array(optimizer.ml_model[optimizer.gvs:])*3)
-
-    archi = pg.archipelago(t = pg.unconnected(),
-                           r_pol= pg.fair_replace(0),
-                           seed = 79*seed+3723)
-    bs_problems = []
-    for x in range(bootstrap_num):
-        bs_opt = MaliceOptimizer(larmor=optimizer.larmor, 
-                                 gvs=optimizer.gvs,
-                                 data = optimizer.data,
-                                 mode='ml_optimization',
-                                 cs_dist='rayleigh',
-                                 nh_scale = optimizer.nh_scale,
-                                 l1_model = optimizer.l1_model,
-                                 reference = optimizer.reference,
-                                 ml_model = optimizer.ml_model,
-                                 bootstrap = True)
-        bs_opt.set_bounds((min_bs,max_bs))
-        bs_problems.append(bs_opt)
-    for x in range(bootstrap_num):
-        pop = pg.population(pg.problem(bs_problems[x]))
-        for k in range(pop_size):    pop.push_back( gen_bspop(bs_problems[x]) )
-        archi.push_back(pop = pop, algo = pg.algorithm( pg.sade(gen=bootstrap_gen,variant=6,variant_adptv=2,ftol=tolerance,xtol=tolerance,seed=seed*(23+x)+49) ) )
-    archi.evolve(1)
-    archi.wait()
-    return archi.get_champions_x()
 
 def truncate_colormap(cmap, minval=0.0, maxval=1.0, n=100):
     new_cmap = colors.LinearSegmentedColormap.from_list(
@@ -300,8 +265,12 @@ def parse_input(fname, larmor, nh_scale):
         resdata = data.copy()[data.residue == res]
         ## Use the lowest titration point (hopefully zero) for the reference
         min_titrant_conc = resdata.titrant.min()
-        reference_points = reference_points.append(resdata.loc[resdata.titrant == min_titrant_conc,['residue','15N','1H','intensity']])
-        #resgrouped = resgrouped.append(resdata.loc[resdata.intensity == np.max(resdata.intensity),['residue','15N','1H','intensity']])
+        reference_points = reference_points.append(resdata.loc[resdata.titrant == min_titrant_conc,['residue','15N','1H','intensity']].mean(axis=0),ignore_index=True)
+        
+        #if len(list(resdata.titrant[resdata.titrant == min_titrant_conc])) == 1:
+        #    reference_points = reference_points.append(resdata.loc[resdata.titrant == min_titrant_conc,['residue','15N','1H','intensity']])
+        #else:
+            
     
     return data, reference_points, residues
 
@@ -444,11 +413,6 @@ def run_malice(config):
         if scale_opt_bounds_max[i] > l1_bounds_max[i]:    scale_opt_bounds_max[i] = l1_bounds_max[i]
     optimizer.set_bounds((scale_opt_bounds_min,scale_opt_bounds_max))
     
-    ## Run the scaling optimization
-    #scale_opt_bounds_min = l1_bounds_min[:gvs] + [0.1]
-    #scale_opt_bounds_max = l1_bounds_min[:gvs] + [10]
-    #optimizer.set_bounds((scale_opt_bounds_min,scale_opt_bounds_max))
-    
     scaled_opt_initial = list(optimizer.l1_model[:gvs]) + [1]
 
     scaled_dw_opt = minimize(optimizer.fitness, scaled_opt_initial, method='SLSQP',bounds=optimizer.get_scipy_bounds(),
@@ -541,207 +505,33 @@ def run_malice(config):
     
     
     
+    ## Stage 4 - MCMC walk in parameter space to estimate confidence intervals
+    print('\n---  Phase 4: Confidence interval estimation of global parameters and delta w  ---\n')
+    print('\tNumber of MCMC walks: '+str(config.mcmc_walks))
     
+    optimizer.mode = 'ml_optimization'
+    lower_conf_limits = []
+    upper_conf_limits = []
     
+    executor = concurrent.futures.ProcessPoolExecutor(config.num_threads)
+    futures = [executor.submit(mcmc_walker, optimizer, config.mcmc_steps, config.confidence, l1_bounds_min, l1_bounds_max, config.seed, k) for k in range(config.mcmc_walks)]
+    concurrent.futures.wait(futures)
     
+    accepted_steps = []
+    for future in futures:   accepted_steps += future.result()
     
+    for i in range(len(optimizer.ml_model)):
+        param = [x[i] for x in accepted_steps]
+        #print(param)
+        if len(param) > 0:
+            lower_conf_limits.append(min(param))
+            upper_conf_limits.append(max(param))
+        else:
+            lower_conf_limits.append(-1)
+            upper_conf_limits.append(-1)
     
-    ## 191127 CODE FOR BOOTSTRAPPING
-    if config.bootstraps > 0:
-        print('\n---  Phase 4: Confidence interval estimation of global parameters and delta w  ---\n')
-        print('\tNumber of bootstrap replicates: '+str(config.bootstraps))
-        
-        bsmodels = bootstrapper(optimizer = optimizer, seed = pygmo_seed+9228,
-                                pop_size = config.pop_size, bootstrap_num = config.bootstraps, 
-                                bootstrap_gen = config.bootstrap_generations,
-                                tolerance = config.tolerance)
-    
-        #Test out reporting of confidence intervals using global parameters
-        global_params = ['Kd_exp','koff_exp','dR2','Amp_scaler','I_noise','CS_noise']
-        
-        alpha_l = (1-config.confidence)/2
-        lower_bs = int( np.round(alpha_l*config.bootstraps) )
-        alpha_u = 1-alpha_l
-        upper_bs = int( np.round(alpha_u*config.bootstraps) ) - 1
-        
-        lower_conf_limits = []
-        upper_conf_limits = []
-        ml_model_stderrs = []
-        print('\n\tPercentile Confidence Interval ('+str(round(config.confidence*100))+'%):')
-        for k in range(len(optimizer.ml_model)):
-            bs_params = [bsmodel[k] for bsmodel in bsmodels]
-            bs_delta = np.sort( np.array(bs_params) - optimizer.ml_model[k] )
-            lower_cl = optimizer.ml_model[k] - bs_delta[upper_bs]
-            if lower_cl < l1_bounds_min[k]:  lower_cl = l1_bounds_min[k]
-            upper_cl = optimizer.ml_model[k] - bs_delta[lower_bs]
-            if upper_cl > l1_bounds_max[k]:  upper_cl = l1_bounds_max[k]
-            
-            bs_stderr = np.std(bs_params,ddof=1)
-            
-            lower_conf_limits.append(lower_cl)
-            upper_conf_limits.append(upper_cl)
-            ml_model_stderrs.append(bs_stderr)
-        
-        
-        global_metrics = pd.DataFrame({'parameter':global_params,
-                                       'dw':optimizer.ml_model[:gvs],
-                                       'se':ml_model_stderrs[:gvs],
-                                       'lower_conf_limit':lower_conf_limits[:gvs],
-                                       'upper_conf_limit':upper_conf_limits[:gvs]})
-        print(global_metrics)
-        
-        residue_metrics = pd.DataFrame({'residue':optimizer.residues,
-                                        'dw':optimizer.ml_model[gvs:],
-                                        'se':ml_model_stderrs[gvs:],
-                                        'lower_conf_limit':lower_conf_limits[gvs:],
-                                        'upper_conf_limit':upper_conf_limits[gvs:]})
-        
-        optimizer.ml_model_stderrs = ml_model_stderrs
-        optimizer.lower_conf_limits = lower_conf_limits
-        optimizer.upper_conf_limits = upper_conf_limits
-        
-                                           
-        
-        
-        
-        # Compute the BCa bootstrap confidence intervals
-        # Equations from http://users.stat.umn.edu/~helwig/notes/bootci-Notes.pdf
-        # Slides 34-36
-        
-        ##### NEED TO FIX THE BCA CALCULATION, SOMETHING IS BROKEN #####
-        '''
-        print('BCa CONFIDENCE INTERVAL ('+str(round(config.confidence*100))+'%):')
-        for k in range(gvs):
-            frac_negative = sum([bsmodel[k] < optimizer.ml_model[k] for bsmodel in bsmodels])/len(bsmodels)
-            if frac_negative == 0:
-                print('Too much assymetry in bootstrap values')
-                continue
-            bias_corr_factor = stats.norm.ppf(frac_negative)
-            
-            #jackknife the acceleration factor
-            jk_est = []
-            for x in range(len(bsmodels)):
-                param_bootstraps_i = [bsmodel[k] for bsmodel in bsmodels]
-                param_bootstraps_i.pop(x)
-                jk_est.append( np.std(param_bootstraps_i, ddof=1) )
-            jk_est = np.array(jk_est)
-            jk_mean = np.mean(jk_est)
-            acc_factor = np.sum(np.power(jk_mean-jk_est,3)) / 6*np.power(np.sum(np.power(jk_mean-jk_est,2)),3/2)
-            
-            z_l = stats.norm.ppf((1-config.confidence)/2)
-            z_u = stats.norm.ppf(1 - (1-config.confidence)/2)
-            
-            bca_alpha_l = stats.norm.cdf( bias_corr_factor + (bias_corr_factor + z_l)/(1 - acc_factor*(bias_corr_factor + z_l)) )
-            bca_alpha_u = stats.norm.cdf( bias_corr_factor + (bias_corr_factor + z_u)/(1 - acc_factor*(bias_corr_factor + z_u)) )
-            
-            print((round(bca_alpha_l,2),round(bca_alpha_u,2)))
-            
-            lower_bs = int( np.round(bca_alpha_l*config.bootstraps) )
-            upper_bs = int( np.round(bca_alpha_u*config.bootstraps) ) - 1
-            
-            bs_delta = np.sort( np.array(bs_params) - optimizer.ml_model[k] )
-            lower_cl = optimizer.ml_model[k] - bs_delta[upper_bs]
-            if lower_cl < l1_bounds_min[k]:  lower_cl = l1_bounds_min[k]
-            upper_cl = optimizer.ml_model[k] - bs_delta[lower_bs]
-            if upper_cl > l1_bounds_max[k]:  upper_cl = l1_bounds_max[k]
-            
-            print('\t'+global_params[k]+' = '+str(round(optimizer.ml_model[k],2))+' ['+str(round(lower_cl,2))+','+str(round(upper_cl,2))+']\n')
-        '''
-        
-    
-    ## Calculate the likelihood based confidence intervals
-    else:   #boostraps == 0
-        optimizer.mode = 'ml_optimization'
-        lower_conf_limits = []
-        upper_conf_limits = []
-        '''
-        for i in range(len(optimizer.ml_model)):
-            # Decrease and increase the parameter by 0.1% until we hit the critical value of 1.92 for 95% confidence
-            scaler = 1.0
-            params = optimizer.ml_model
-            while optimizer.fitness(params)[0] - performance['ml_model_score'] <= stats.chi2.ppf(config.confidence,df=1)/2:
-                params[i] = optimizer.ml_model[i]*scaler
-                scaler-=0.001
-            lower_conf_limits.append(params[i])
-            
-            scaler = 1.0
-            params = optimizer.ml_model
-            while optimizer.fitness(params)[0] - performance['ml_model_score'] <= stats.chi2.ppf(config.confidence,df=1)/2:
-                params[i] = optimizer.ml_model[i]*scaler
-                scaler+=0.001
-            upper_conf_limits.append(params[i])
-        '''
-        
-        ## Set up a MCMC walk within the parameter space
-        # Let's start with 10 random walks of 10K steps
-        walks = 50
-        
-        # Set this up now using the mcmc function
-        executor = concurrent.futures.ProcessPoolExecutor(config.num_threads)
-        futures = [executor.submit(mcmc_walker, optimizer, config.mcmc_steps, config.confidence, l1_bounds_min, l1_bounds_max, config.seed, k) for k in range(config.mcmc_walks)]
-        concurrent.futures.wait(futures)
-
-        
-        accepted_steps = []
-        for future in futures:   accepted_steps += future.result()
-        
-        '''
-        walk_length = 10000
-        accepted_steps = []
-        for i in range(walks):
-            model = list(optimizer.ml_model)
-            counter = 0
-            consecutive_failed = 0
-            for j in range(walk_length):
-                prev_model = list(model)
-                
-                model[0]+=np.random.normal(0,0.005)
-                model[1]+=np.random.normal(0,0.005)
-                model[2]+=np.random.normal(0,0.1)
-                model[3]+=np.random.normal(0,model[3]/100)
-                model[4]+=np.random.normal(0,model[4]/100)
-                model[5]+=np.random.normal(0,model[5]/100)
-                model[gvs:] = list(np.array(model[gvs:]) + np.random.normal(0,0.1,len(model[gvs:])))
-               
-                
-
-                # For global variables, allow it to walk randomly -/+ 0.1% and dw to move randomly -/+ 0.1 Hz
-                perturbation = list((np.random.random(gvs)-0.5)/500*np.array(model[:gvs])) + list((np.random.random(len(model[gvs:]))-0.5)/5)
-                model = list(np.array(model) + perturbation)
-                
-                #model[:gvs] = np.array(model[:gvs]) + (np.random.random(gvs)-0.5)/500*np.array(model[:gvs])
-                # Allow movement of dw to be randomly -/+ 0.1 Hz
-                #model[gvs:] = np.array(model[gvs:]) + (np.random.random(len(model[gvs:]))-0.5)/5
-                
-                if optimizer.fitness(model)[0] - performance['ml_model_score'] <= stats.chi2.ppf(config.confidence,df=1)/2:
-                    accepted_steps.append(list(model))
-                    counter+=1
-                    consecutive_failed = 0
-                else:
-                    model = list(prev_model)
-                    consecutive_failed += 1
-                
-                if consecutive_failed > 50: break
-            print('Walk #'+str(i+1)+': Accepted '+str(counter)+' of '+str(j+1)+' steps')
-        '''
-        
-        
-        
-        for i in range(len(optimizer.ml_model)):
-            param = [x[i] for x in accepted_steps]
-            #print(param)
-            if len(param) > 0:
-                lower_conf_limits.append(min(param))
-                upper_conf_limits.append(max(param))
-            else:
-                lower_conf_limits.append(-1)
-                upper_conf_limits.append(-1)
-            
-        #print(lower_conf_limits)
-        
-        optimizer.ml_model_stderrs = list(optimizer.ml_model) #JUST STICKING NUMBERS IN FOR NOW
-        optimizer.lower_conf_limits = list(lower_conf_limits)
-        optimizer.upper_conf_limits = list(upper_conf_limits)
+    optimizer.lower_conf_limits = list(lower_conf_limits)
+    optimizer.upper_conf_limits = list(upper_conf_limits)
     
     performance['phase4_time'] = time.time() - performance['start_time']
     performance['current_time'] = time.time() - performance['start_time']
@@ -759,52 +549,8 @@ def run_malice(config):
     summary_pdf_name = os.path.join(config.output_dir, fname_prefix + '_CompLEx_summary.pdf')
     summary_pdf.output(summary_pdf_name)
     
-    
-    ## Dump out data so I can keep testing the CompLExReport function without running MaLICE
-    '''
-    data_dir = os.path.join(config.output_dir,'data')
-    pickle.dump(optimizer, os.path.join(data_dir,'optimizer'))
-    pickle.dump(config, os.path.join(data_dir,'config'))
-    pickle.dump(performance, os.path.join(data_dir,'performance'))
-    '''
-
-    
-    
-    
-    
-    
-    
-    
-    
-    ## Perform likelihood ratio tests
-    ##### DISABLE ALL OF THESE FOR THE TIME BEING -- NEEDS TO BE REWRITTEN
-    '''
-    print('\n---  Round 4: likelihood ratio test of parameters  ---\n')
-    executor = concurrent.futures.ProcessPoolExecutor(config.thread_count)
-    futures = [executor.submit(null_calculator, optimizer.fitness, config, mleinput, model3b.x, dfs, gvs, bds1, r) for r in residues]
-    concurrent.futures.wait(futures)
-
-    dfs['altLL'] = -1 * model3b.fun
-    dfs['nullLL'] = [-1*x.result() for x in futures]
-    dfs['deltaLL'] = dfs.altLL - dfs.nullLL
-    dfs['rank'] = dfs['deltaLL'].rank(ascending=False,na_option='top')
-    dfs['p-value'] = (1-stats.chi2.cdf(2*dfs.deltaLL,df=1))*len(dfs)/dfs['rank']
-    dfs = dfs.sort_values('deltaLL',ascending=False)
-    dfs['sig'] = dfs['p-value'] < 0.01
-    
-    png_name = os.path.join(config.output_dir, fname_prefix + '_MaLICE_plot.png')
-    fig, ax = plt.subplots(figsize=(12,8))
-    ax.scatter('residue','dw',data=dfs[dfs.sig == False],color='black',s=80)
-    #ax.errorbar('residue','dw',yerr='stderr',data=dfs[dfs.sig == False],color='black',fmt='none',s=20)
-    ax.scatter('residue','dw',data=dfs[dfs.sig == True],color='red',s=80)
-    #ax.errorbar('residue','dw',yerr='stderr',data=dfs[dfs.sig == True],color='red',fmt='none',s=20)
-    ax.set(xlim=(np.min(dfs.residue)+1,np.max(dfs.residue)+1),xlabel='Residue',ylabel='Δω (Hz)')
-    fig.savefig(png_name,dpi=600,bbox_inches='tight',pad_inches=0)
-    '''
-
-
-    
     performance['current_time'] = time.time() - performance['start_time']
     print('\n\tFinal run time = '+str(datetime.timedelta(seconds=performance['current_time'])).split('.')[0])
+    
 if __name__ == "__main__":
     main()
