@@ -15,7 +15,6 @@ import concurrent.futures
 import pygmo as pg
 from fpdf import FPDF
 import nmrglue as ng
-import pickle
 
 from malice.optimizer import MaliceOptimizer
 from malice.reporter import CompLEx_Report
