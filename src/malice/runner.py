@@ -100,6 +100,11 @@ def _parse_args():
                         type=str,
                         help='Name of the titrant',
                         default='Sample titrant')
+    #TODO: find a better place for this
+    parser.add_argument('--s3_prefix',
+                        type=str,
+                        help='S3 bucket and key prefix to upload zip to. Do not include trailing "/"',
+                        default=None)
     # TODO: validate arguments
     return parser.parse_args()
 
