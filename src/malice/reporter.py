@@ -5,8 +5,10 @@ from scipy.optimize import curve_fit
 from matplotlib import pyplot as plt
 import matplotlib.cm as cm
 import matplotlib.colors as colors
-from fpdf import FPDF
+from fpdf import fpdf, FPDF
 import nmrglue as ng
+import pathlib
+from malice.resources import fonts
 
 
 def truncate_colormap(cmap, minval=0.0, maxval=1.0, n=256):
@@ -231,14 +233,20 @@ def generate_sim_spectrum(optimizer, fit_peaks, larmor, residue, theta, theta_se
     
     return file_name
 
+# Sets the directory fpdf searches for fonts
+def set_font_dir():
+     font_dir = pathlib.Path(fonts.__file__).parent.absolute()
+     fpdf.FPDF_FONT_DIR = font_dir
 
 def CompLEx_Report(optimizer, config, performance, lam, seed, image_dir):
     pdf = CompLEx_PDF(orientation='portrait', unit='in', format='letter')
     pdf.set_margins(0.5,0.5,0.5)
+    set_font_dir()
     pdf.add_font('DejaVu', '', 'DejaVuSansCondensed.ttf', uni=True)
     pdf.add_font('DejaVu', 'B', 'DejaVuSansCondensed-Bold.ttf', uni=True)
     pdf.add_font('DejaVu', 'I', 'DejaVuSansCondensed-Oblique.ttf', uni=True)
     pdf.add_font('DejaVu', 'BI', 'DejaVuSansCondensed-BoldOblique.ttf', uni=True)
+    fixed_width = "DejaVu"
     pdf.add_page()
     
     pdf.set_font('Arial','B',16)
@@ -272,12 +280,12 @@ def CompLEx_Report(optimizer, config, performance, lam, seed, image_dir):
     fixed_params_text = [('# of global variables', optimizer.gvs, 0),
                          ('15N-1H scaler', optimizer.nh_scale, 2), 
                          ('Larmor frequency (Hz)', optimizer.larmor, 0)]
-    pdf.set_font('DejaVu','BI',12)
+    pdf.set_font(fixed_width,'BI',12)
     pdf.cell(3,14/72,txt='Fixed parameters:',ln=1,border=0,align='L')
     for name, var, round_digits in fixed_params_text:
-        pdf.set_font('DejaVu','I',10)
+        pdf.set_font(fixed_width,'I',10)
         pdf.cell(2.2, 10/72, txt='    '+name+':', ln=0)
-        pdf.set_font('DejaVu','B',10)
+        pdf.set_font(fixed_width,'B',10)
         pdf.cell(0.5, 10/72, txt=str(round(var,round_digits)), ln=1, align='R')
     
     pdf.ln(0.2)
@@ -295,12 +303,12 @@ def CompLEx_Report(optimizer, config, performance, lam, seed, image_dir):
                        ('Founder seed', seed),
                        ('PyGMO tolerance', format(config.tolerance, '.1g')),
                        ('Least squares max iterations', format(config.least_squares_max_iter,'.1g'))]
-    pdf.set_font('DejaVu','BI',12)
+    pdf.set_font(fixed_width,'BI',12)
     pdf.cell(3,14/72,txt='Optimization settings:',ln=1,border=0,align='L')
     for name, var in opt_params_text:
-        pdf.set_font('DejaVu','I',10)
+        pdf.set_font(fixed_width,'I',10)
         pdf.cell(2.2, 10/72, txt='    '+name+':', ln=0)
-        pdf.set_font('DejaVu','B',10)
+        pdf.set_font(fixed_width,'B',10)
         pdf.cell(0.5, 10/72, txt=str(var), ln=1, align='R')
     
     
@@ -308,7 +316,7 @@ def CompLEx_Report(optimizer, config, performance, lam, seed, image_dir):
     pdf.set_xy(curr_x, init_y)
     
     ## Insert model performance results here
-    pdf.set_font('DejaVu','BI',12)
+    pdf.set_font(fixed_width,'BI',12)
     pdf.cell(3,14/72,txt='Model performance:',ln=1,border=0,align='L')
     
     performance_text = (('L1 Model Penalized -logL', format(performance['l1_model_score'],'.1f')),
@@ -323,10 +331,10 @@ def CompLEx_Report(optimizer, config, performance, lam, seed, image_dir):
                         ('Total runtime', str(datetime.timedelta(seconds=performance['current_time'])).split('.')[0]))
     
     for name, var in performance_text:
-        pdf.set_font('DejaVu','I',10)
+        pdf.set_font(fixed_width,'I',10)
         pdf.set_x(curr_x)
         pdf.cell(2.5, 10/72, txt='    '+name+':', ln=0)
-        pdf.set_font('DejaVu','B',10)
+        pdf.set_font(fixed_width,'B',10)
         pdf.cell(0.5, 10/72, txt=var, ln=1, align='R')
     
     pdf.ln(0.1)
@@ -350,11 +358,11 @@ def CompLEx_Report(optimizer, config, performance, lam, seed, image_dir):
                              ('Amplitude scaler', format(optimizer.ml_model[3],'.2g'), format(optimizer.lower_conf_limits[3],'.2g'), format(optimizer.upper_conf_limits[3],'.2g')),
                              ('Intensity ε', format(optimizer.ml_model[4],'.2g'), format(optimizer.lower_conf_limits[4],'.2g'), format(optimizer.upper_conf_limits[4],'.2g')),
                              ('CS ε (Hz)', format(optimizer.ml_model[5],'.2f'), format(optimizer.lower_conf_limits[5],'.2f'), format(optimizer.upper_conf_limits[5],'.2f')))  
-    pdf.set_font('DejaVu','BI',12)
+    pdf.set_font(fixed_width,'BI',12)
     pdf.set_x(curr_x)
     pdf.cell(3,14/72,txt='Global variables:',ln=1,border=0,align='L')
     pdf.ln(0.05)
-    pdf.set_font('DejaVu','BIU',10)
+    pdf.set_font(fixed_width,'BIU',10)
     pdf.set_x(curr_x)
     pdf.cell(width, 10/72, txt='Variable', ln=0, align='L')
     pdf.set_x(curr_x+width)
@@ -368,9 +376,9 @@ def CompLEx_Report(optimizer, config, performance, lam, seed, image_dir):
     #for name, mle, stderr, lower_cl, upper_cl in global_variables_text:
     for name, mle, lower_cl, upper_cl in global_variables_text:
         pdf.set_x(curr_x)
-        pdf.set_font('DejaVu','I',10)
+        pdf.set_font(fixed_width,'I',10)
         pdf.cell(width, 10/72, txt = name, ln=0, align='L')
-        pdf.set_font('DejaVu','B',10)
+        pdf.set_font(fixed_width,'B',10)
         pdf.set_x(curr_x+width)
         pdf.cell(width, 10/72, txt = str(mle), ln=0, align='C')
         pdf.set_x(curr_x+2*width)
@@ -385,12 +393,12 @@ def CompLEx_Report(optimizer, config, performance, lam, seed, image_dir):
     file_text = (('Reference peak optimization', fname_prefix + '_reference_peaks.csv'),
                  ('Δω spreadsheeet', fname_prefix + '_CompLEx_fits.csv'),
                  ('Δω text file', fname_prefix + '_CompLEx_deltaw.txt'))
-    pdf.set_font('DejaVu','BI',12)
+    pdf.set_font(fixed_width,'BI',12)
     pdf.cell(3, 12/72, txt='Output files:', ln=1, align='L')
     for name, var in file_text:
-        pdf.set_font('DejaVu','',10)
+        pdf.set_font(fixed_width,'',10)
         pdf.cell(3, 10/72, txt='    '+name+':', ln=0, align='L')
-        pdf.set_font('DejaVu','B',10)
+        pdf.set_font(fixed_width,'B',10)
         pdf.cell(3, 10/72, txt=var, ln=1, align='L')
     
     pdf.ln(0.2)
@@ -492,7 +500,7 @@ def CompLEx_Report(optimizer, config, performance, lam, seed, image_dir):
         if i%3 == 0:    
             pdf.add_page()
             pdf.ln(0.1)
-        pdf.set_font('DejaVu','B',12)
+        pdf.set_font(fixed_width,'B',12)
         pdf.cell(3, 12/72, txt='Residue '+str(residue), ln=1, align='L')
         
         residue_data = optimizer.data.loc[optimizer.data.residue == residue,['15N','1H']]
@@ -595,9 +603,9 @@ def CompLEx_Report(optimizer, config, performance, lam, seed, image_dir):
         ## Add relevant text detailing fits of each residue
         pdf.ln(0.2)
         pdf.set_x(pdf.get_x()+5.7)
-        pdf.set_font('DejaVu','I',8)
+        pdf.set_font(fixed_width,'I',8)
         pdf.cell(1.5, 8/72, txt = '# of observed titration points:', ln=0, align='L')
-        pdf.set_font('DejaVu','B',8)
+        pdf.set_font(fixed_width,'B',8)
         pdf.cell(0.2, 8/72, txt = str(len(residue_fits)), ln=1, align='R')
         pdf.ln(10/72)
         
@@ -612,13 +620,13 @@ def CompLEx_Report(optimizer, config, performance, lam, seed, image_dir):
                             format(float(original_ref['intensity'])-float(current_ref['I_ref']),'.2g')) )
         
         pdf.set_x(pdf.get_x()+5.7)
-        pdf.set_font('DejaVu','I',9)
+        pdf.set_font(fixed_width,'I',9)
         pdf.cell(2.8, 10/72, txt = 'Reference peak:', ln=1, align='L')
         for name, value, change in reference_text:
             pdf.set_x(pdf.get_x()+5.7)
-            pdf.set_font('DejaVu','I',7)
+            pdf.set_font(fixed_width,'I',7)
             pdf.cell(0.55, 7/72, txt = '    '+name, ln=0, align='L')
-            pdf.set_font('DejaVu','B',7)
+            pdf.set_font(fixed_width,'B',7)
             pdf.cell(0.6, 7/72, txt = value, ln=0, align='R')
             if np.sign(float(change)) > 0: sign = '+'
             else:   sign = ''
@@ -628,12 +636,12 @@ def CompLEx_Report(optimizer, config, performance, lam, seed, image_dir):
         
         
         pdf.set_x(pdf.get_x()+5.7+0.34+0.47)
-        pdf.set_font('DejaVu','I',8)
+        pdf.set_font(fixed_width,'I',8)
         pdf.cell(0.47, 9/72, txt = format(alpha_l,'.1%')+' CL', ln=0, align='C')
         pdf.cell(0.47, 9/72, txt = format(alpha_u,'.1%')+' CL', ln=1, align='C')
         pdf.set_x(pdf.get_x()+5.7)
         pdf.cell(0.34, 9/72, txt = 'Δω (Hz):', ln=0, align='L')
-        pdf.set_font('DejaVu','B',8)
+        pdf.set_font(fixed_width,'B',8)
         pdf.cell(0.47, 9/72, txt = format(float(residue_dw_df.loc[residue_dw_df.residue == residue, 'dw']),'.1f'), ln=0, align='R')
         pdf.cell(0.47, 9/72, txt = format(float(residue_dw_df.loc[residue_dw_df.residue == residue, 'lower']),'.1f'), ln=0, align='C')
         pdf.cell(0.47, 9/72, txt = format(float(residue_dw_df.loc[residue_dw_df.residue == residue, 'upper']),'.1f'), ln=1, align='C')
