@@ -112,7 +112,7 @@ def gen_pop1(optimizer):
     Kd_exp_random = list(np.random.random(1)*5-1)   # Will span from 100 nM to 10 mM
     kex_exp_random = list(np.random.random(1)*4+3)  # Will span from 1 kHz to 10 Mhz
     dR2_random = list(np.random.random(1)*200)            # 0 - 200 Hz
-    amp_scaler_random = [np.random.normal(np.mean(optimizer.data.intensity),np.std(optimizer.data.intensity)) * 20]
+    amp_scaler_random = [np.random.normal(np.mean(optimizer.data.intensity),np.std(optimizer.data.intensity)) * 5]
         # random amp logic is that since amp = intensity * lw, lets just randomly sample something from the reasonable intensity
         # range and multiply by 20, which is probably a decent enough guess of typical protein linewidths
     i_noise_random = list(np.mean(optimizer.data.intensity)/(np.random.random(1)*46+4)) # 1/4 to 1/50th of mean intensity
@@ -287,7 +287,7 @@ def run_malice(config):
     ## Important variables
     larmor = config.larmor
     gvs = 6
-    lam = 0.012
+    lam = 0.015
     nh_scale = 0.2  # Consider reducing to ~0.14
     
     pygmo_seed = 2*config.seed - 280
@@ -311,7 +311,7 @@ def run_malice(config):
     print('\n---  Phase 1: Differential evolution for parameter optimization with L1 regularization  ---\n')
     
     l1_bounds_min = [-1, 1, 0, np.min(user_data.intensity)/10, i_noise_est/10, larmor/4500] + list([0]*len(residues))
-    l1_bounds_max = [4, 7, 200, np.max(user_data.intensity)*200, i_noise_est*10, larmor/50] + list([6*larmor]*len(residues))
+    l1_bounds_max = [4, 7, 200, np.max(user_data.intensity)*200, i_noise_est*10, larmor/5] + list([6*larmor]*len(residues))
     optimizer.set_bounds((l1_bounds_min,l1_bounds_max))
     
     optimizer.l1_model, performance['l1_model_score'] = pygmo_wrapper(optimizer,
@@ -327,8 +327,8 @@ def run_malice(config):
     performance['l1_unpenalized_score'] = optimizer.fitness(optimizer.l1_model)[0]
     print('\tUnpenalized -logL:\t'+str(round(performance['l1_unpenalized_score'],2)))
     
-    print('\n\tKd = '+str(round(np.power(10,optimizer.l1_model[0]),2))+
-          '\n\tkoff = '+str(round(np.power(10,optimizer.l1_model[1]),2))+
+    print('\n\tKd = '+str(round(np.power(10.0,optimizer.l1_model[0]),2))+
+          '\n\tkoff = '+str(round(np.power(10.0,optimizer.l1_model[1]),2))+
           '\n\tdR2 = '+str(round(optimizer.l1_model[2],2))+
           '\n\tAmp_scaler = '+str(round(optimizer.l1_model[3],2))+
           '\n\tInoise = '+str(round(optimizer.l1_model[4],2))+
@@ -458,20 +458,13 @@ def run_malice(config):
     optimizer.ml_model = ml_model_opt.x
 
     ## Let's go ahead and print some results + save a figure
-    print('\n\tKd = '+str(round(np.power(10,optimizer.ml_model[0]),2))+
-          '\n\tkoff = '+str(round(np.power(10,optimizer.ml_model[1]),2))+
+    print('\n\tKd = '+str(round(np.power(10.0,optimizer.ml_model[0]),2))+
+          '\n\tkoff = '+str(round(np.power(10.0,optimizer.ml_model[1]),2))+
           '\n\tdR2 = '+str(round(optimizer.ml_model[2],2))+
           '\n\tAmp_scaler = '+str(round(optimizer.ml_model[3],2))+
           '\n\tInoise = '+str(round(optimizer.ml_model[4],2))+
           '\n\tCSnoise = '+str(round(optimizer.ml_model[5],2))+
           '\n\tMax dw = '+str(round(np.max(optimizer.ml_model[gvs:]),2)))
-
-    dfs = pd.DataFrame({'residue':residues,'dw':optimizer.ml_model[gvs:]/larmor})
-    ## Print out data
-    csv_name = os.path.join(config.output_dir, fname_prefix + '_CompLEx_fits.csv')
-    txt_name = os.path.join(config.output_dir, fname_prefix+'_CompLEx_deltaw.txt')
-    dfs.to_csv(csv_name,index=False)
-    dfs[['residue','dw']].to_csv(txt_name, index=False,header=False)
     
     performance['phase3_time'] = time.time() - performance['start_time']
     performance['current_time'] = time.time() - performance['start_time']
@@ -544,6 +537,23 @@ def run_malice(config):
     ## Generate summary PDF
     
     print('\n---  Phase 5: Generating output files  ---\n')
+    
+    ## Generate a CSV with confidence intervals for all of the delta_w's
+    alpha = 100.0*(1-config.confidence)/2
+    dfs = pd.DataFrame({'residue':residues,'delta_w':optimizer.ml_model[gvs:]/larmor,
+                        'conf_limit_'+str(round(alpha,1)):optimizer.lower_conf_limits[gvs:],
+                        'conf_limit_'+str(round(100-alpha,1)):optimizer.upper_conf_limits[gvs:]})
+    ## Print out data
+    csv_name = os.path.join(config.output_dir, fname_prefix + '_CompLEx_deltaw.csv')
+    txt_name = os.path.join(config.output_dir, fname_prefix+'_CompLEx_deltaw.txt')
+    dfs.to_csv(csv_name,index=False)
+    dfs[['residue','delta_w']].to_csv(txt_name, index=False,header=False)
+    
+    ## Spit out the fit points
+    fit_points_name = os.path.join(config.output_dir, fname_prefix+'_CompLEx_fit_points.csv')
+    optimizer.mode = 'pfitter'
+    fit_points = optimizer.fitness()
+    fit_points.to_csv(fit_points_name, index=False)
     
     #Make a folder for figures
     image_dir = os.path.join(config.output_dir,'images')

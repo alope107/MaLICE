@@ -1,7 +1,7 @@
 import os, sys, datetime
 import numpy as np, pandas as pd
 import scipy.stats as stats
-from scipy.optimize import curve_fit
+from scipy.optimize import minimize
 from matplotlib import pyplot as plt
 import matplotlib.cm as cm
 import matplotlib.colors as colors
@@ -350,10 +350,10 @@ def CompLEx_Report(optimizer, config, performance, lam, seed, image_dir):
     #pdf.set_fill_color(255, 255, 255)
     pdf.rect(curr_x, pdf.get_y()-0.02, 4*width+0.02,(12+7*10)/72+0.10, 'D')
 
-    global_variables_text = (('Kd (uM)', format(np.power(10,optimizer.ml_model[0]),'.1f'), format(np.power(10,optimizer.lower_conf_limits[0]),'.1f'),
-                              format(np.power(10,optimizer.upper_conf_limits[0]),'.1f')),
-                             ('koff (Hz)', format(np.power(10,optimizer.ml_model[1]),'.1f'), format(np.power(10,optimizer.lower_conf_limits[1]),'.1f'),
-                              format(np.power(10,optimizer.upper_conf_limits[1]),'.1f')),
+    global_variables_text = (('Kd (uM)', format(np.power(10.0,optimizer.ml_model[0]),'.1f'), format(np.power(10.0,optimizer.lower_conf_limits[0]),'.1f'),
+                              format(np.power(10.0,optimizer.upper_conf_limits[0]),'.1f')),
+                             ('koff (Hz)', format(np.power(10.0,optimizer.ml_model[1]),'.1f'), format(np.power(10.0,optimizer.lower_conf_limits[1]),'.1f'),
+                              format(np.power(10.0,optimizer.upper_conf_limits[1]),'.1f')),
                              ('ΔR2 (Hz)', format(optimizer.ml_model[2],'.2f'), format(optimizer.lower_conf_limits[2],'.2f'), format(optimizer.upper_conf_limits[2],'.2f')),
                              ('Amplitude scaler', format(optimizer.ml_model[3],'.2g'), format(optimizer.lower_conf_limits[3],'.2g'), format(optimizer.upper_conf_limits[3],'.2g')),
                              ('Intensity ε', format(optimizer.ml_model[4],'.2g'), format(optimizer.lower_conf_limits[4],'.2g'), format(optimizer.upper_conf_limits[4],'.2g')),
@@ -405,28 +405,20 @@ def CompLEx_Report(optimizer, config, performance, lam, seed, image_dir):
     
     ## Add plot of the per-residue delta_w fits
     
-    #rainbow_cmap = truncate_colormap(plt.get_cmap('hsv_r'), 0.32, 1.0, n=1024)
     rainbow_cmap = truncate_colormap(plt.get_cmap('jet'), 0.18, 0.92, n=1024)
     
     deltaw_df = pd.DataFrame({'residue':optimizer.residues,
                               'dw':optimizer.ml_model[optimizer.gvs:]/optimizer.larmor})
     deltaw_df['color'] = deltaw_df.residue/deltaw_df.residue.max()
     fig, ax = plt.subplots(figsize=(7.5,4.5))
-    #dw_error_bars = [((optimizer.ml_model[x]-optimizer.lower_conf_limits[x])/optimizer.larmor,
-    #                  (optimizer.upper_conf_limits[x]-optimizer.ml_model[x])/optimizer.larmor) for x in range(optimizer.gvs,len(optimizer.ml_model))]
-    #print(dw_error_bars)
-    #print(len(dw_error_bars))
     dw_error_bars = [(np.array(optimizer.ml_model[optimizer.gvs:]) - np.array(optimizer.lower_conf_limits[optimizer.gvs:]))/optimizer.larmor,
                      (np.array(optimizer.upper_conf_limits[optimizer.gvs:]) - np.array(optimizer.ml_model[optimizer.gvs:]))/optimizer.larmor]
     ax.errorbar('residue', 'dw', data=deltaw_df, yerr=dw_error_bars,
                 color='black', fmt='none', s=32, zorder=1)
-    #ax.scatter('residue', 'dw', data=deltaw_df, c='black', s=48)
     ax.scatter('residue', 'dw', data=deltaw_df, c=deltaw_df.residue, cmap=rainbow_cmap, edgecolors='black', linewidths=0.5, s=48, zorder=2)
     ax.set(title='Per-residue estimates of Δω', xlabel='Residue No.', ylabel='Δω (ppm)', 
            xlim=(deltaw_df.residue.min()-1,deltaw_df.residue.max()+1),
            ylim = (-0.02, 1.05*max(optimizer.upper_conf_limits[optimizer.gvs:])/optimizer.larmor))
-           #ylim=(-0.05, 1.1*max(np.array(optimizer.ml_model[optimizer.gvs:]) + np.array(optimizer.upper_conf_limits[optimizer.gvs:]))/optimizer.larmor))
-           #ylim=(-0.05,1.1*max(optimizer.upper_conf_limits[optimizer.gvs:])/optimizer.larmor))
     fig.tight_layout(pad=0.3)
     fig.savefig(os.path.join(image_dir,'deltaw_plot.png'),dpi=600)
     plt.close(fig)
@@ -572,27 +564,20 @@ def CompLEx_Report(optimizer, config, performance, lam, seed, image_dir):
         
         
         ## Generate the simulated spectra based on CompLEx parameter estimates
-                
-        def theta_estimator(fit_csp, theta):
-            return fit_csp*np.sqrt((np.square(np.cos(theta))+np.square(np.sin(theta))))
         
-        est, covar = curve_fit(theta_estimator, residue_fits.csfit, residue_fits.csp, bounds=((0,np.pi/2)))
+        def csp_fitter(theta):
+            return np.sum(  np.square( (residue_fits['15N']-residue_fits['15N_ref']) - residue_fits.csfit*np.sin(theta)/0.2 ) +
+                            np.square( (residue_fits['1H']-residue_fits['1H_ref']) - residue_fits.csfit*np.cos(theta) )   )
         
-        mean_delta_1H = np.mean( residue_fits['1H']-residue_fits['1H_ref'] )
-        mean_delta_15N = np.mean( residue_fits['15N']-residue_fits['15N_ref'] )
-        
-        if mean_delta_1H < 0 and mean_delta_15N < 0:    theta = est
-        elif mean_delta_1H < 0 and mean_delta_15N > 0:  theta = 2*np.pi - est
-        elif mean_delta_1H > 0 and mean_delta_15N < 0:  theta = np.pi - est
-        elif mean_delta_1H > 0 and mean_delta_15N > 0:  theta = np.pi + est
+        theta_est = minimize( csp_fitter, np.pi/4, method='L-BFGS-B' ).x[0]
         
         # Add the simulated spectrum figure
         figure_name = generate_sim_spectrum(optimizer, 
                                             regression_at_titrant_concs, 
                                             optimizer.larmor, 
                                             residue,
-                                            theta,
-                                            covar[0],
+                                            theta_est,
+                                            0,
                                             titrant_concs,
                                             plasma_titrant, 
                                             image_dir)
