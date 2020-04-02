@@ -87,17 +87,21 @@ class MaliceOptimizer(object):
                                       columns=['titrant','residue'])
                 pts_15N = []
                 pts_1H = []
+                pts_int = []
                 for i in range(len(res_df)):
                     focal_data = self.data[(self.data.residue == res_df.residue[i]) &
                                                 (self.data.titrant == res_df.titrant[i])]
-                    if len(focal_data) == 1:
-                        pts_15N.append(float(focal_data['15N']))
-                        pts_1H.append(float(focal_data['1H']))
+                    if len(focal_data) >= 1:
+                        pts_15N.append(float(focal_data['15N'].mean()))
+                        pts_1H.append(float(focal_data['1H'].mean()))
+                        pts_int.append(float(focal_data['intensity'].mean()))
                     else:
                         pts_15N.append(np.nan)
                         pts_1H.append(np.nan)
+                        pts_int.append(np.nan)
                 res_df['15N'] = pts_15N
                 res_df['1H'] = pts_1H
+                res_df['intensity'] = pts_int
                 fitter_input = pd.merge(fitter_input,res_df,on='titrant')
             
             

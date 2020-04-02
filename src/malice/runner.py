@@ -219,32 +219,9 @@ def mcmc_walker(optimizer, steps, confidence, min_global, max_global, seed, iter
     
     return accepted_steps
 
-
-
-def null_calculator(fx, config, mleinput, model, df, gvs, bds, res):
-    dfx = df.copy()
-    dfx.loc[dfx.residue == res,'dw'] = 0
-    
-    mininit = [model[0]-0.2, model[1]-0.2, model[2]-10, model[3]/1.2,
-               model[4]/1.2, model[5]/1.2, model[6]/1.2] + list(dfx.dw/2)
-    maxinit = [model[0]+0.2, model[1]+0.2, model[2]+10, model[3]*1.2,
-               model[4]*1.2, model[5]*1.2, model[6]*1.2] + list(dfx.dw*2)
-    
-    for i in range(gvs):
-        if mininit[i] < bds[i][0]:    mininit[i] = bds[i][0]
-        if maxinit[i] > bds[i][1]:    maxinit[i] = bds[i][1]
-    
-    bdsx = tuple([(mininit[x],maxinit[x]) for x in range(len(mininit))])
-    
-    initx = list(model)
-    
-    # Minimize
-    nullLL = minimize(fx, initx, args=(mleinput,), method='SLSQP', bounds=bdsx,
-                      tol=1e-7, options={'disp':True,'maxiter':config.least_squares_max_iter})
-
-    print('null LogL calculated for residue '+str(res))
-    
-    return nullLL.fun
+def csp_trajectory(theta, data_points, nh_scale):
+    return np.sum(  np.square( (data_points['15N']-data_points['15N_ref'])*nh_scale - data_points.csfit*np.sin(theta) ) +
+                    np.square( (data_points['1H']-data_points['1H_ref']) - data_points.csfit*np.cos(theta) )   )
 
 def main():
     args = _parse_args()
@@ -469,38 +446,6 @@ def run_malice(config):
     performance['phase3_time'] = time.time() - performance['start_time']
     performance['current_time'] = time.time() - performance['start_time']
     print('\n\tCurrent run time = '+str(datetime.timedelta(seconds=performance['current_time'])).split('.')[0])
-
-    ## Output the per-residue fits
-    
-    optimizer.mode = 'lfitter'
-    fit_data = optimizer.fitness()
-    optimizer.mode = 'pfitter'
-    mleoutput = optimizer.fitness()
-    
-    titrant_rng = fit_data.titrant.max()-fit_data.titrant.min()
-    xl = [np.min(fit_data.titrant)-0.01*titrant_rng, np.max(fit_data.titrant)+0.01*titrant_rng]
-    csp_rng = np.max(mleoutput.csp)-np.min(mleoutput.csp)
-    yl_csp = [np.min(mleoutput.csp)-0.05*csp_rng, np.max(mleoutput.csp)+0.05*csp_rng]
-    int_rng = np.max(mleoutput.intensity)-np.min(mleoutput.intensity)
-    yl_int = [np.min(mleoutput.intensity)-0.05*int_rng, np.max(mleoutput.intensity)+0.05*int_rng]
-
-    pdf_name = os.path.join(config.output_dir, fname_prefix + '_CompLEx_fits.pdf')
-    with PdfPages(pdf_name) as pdf:
-        for residue in residues:
-            fig, ax = plt.subplots(ncols=2,figsize=(7.5,2.5))
-            ax[0].scatter('titrant','csp',data=mleoutput[mleoutput.residue == residue],color='black',s=10)
-            ax[0].errorbar('titrant','csp',data=mleoutput[mleoutput.residue == residue],yerr=optimizer.ml_model[5]/larmor,color='black',fmt='none',s=16)
-            ax[0].plot('titrant','csfit',data=fit_data[fit_data.residue == residue])
-            ax[1].scatter('titrant','intensity',data=mleoutput[mleoutput.residue == residue],color='black',s=10)
-            ax[1].errorbar('titrant','intensity',data=mleoutput[mleoutput.residue == residue],yerr=optimizer.ml_model[4],color='black',fmt='none',s=16)
-            ax[1].plot('titrant','ifit',data=fit_data[fit_data.residue == residue])
-            ax[0].set(xlim=xl, ylim=yl_csp, xlabel='Titrant (μM)', ylabel='CSP (ppm)', title='Residue '+str(residue)+' CSP')
-            ax[1].set(xlim=xl, ylim=yl_int, xlabel='Titrant (μM)', ylabel='Intensity', title='Residue '+str(residue)+' Intensity')
-            fig.tight_layout()
-            pdf.savefig()
-            plt.close()
-    
-    
     
     ## Stage 4 - MCMC walk in parameter space to estimate confidence intervals
     print('\n---  Phase 4: Confidence interval estimation of global parameters and delta w  ---\n')
@@ -534,31 +479,63 @@ def run_malice(config):
     performance['current_time'] = time.time() - performance['start_time']
     print('\n\tCurrent run time = '+str(datetime.timedelta(seconds=performance['current_time'])).split('.')[0])
     
-    ## Generate summary PDF
+    ## Infer CSP trajectories
+    print('\n---  Phase 5: CSP trajectory inference  ---\n')
+
+    optimizer.mode = 'pfitter'
+    fit_points = optimizer.fitness()
+
+    thetas = []
+    theta_F_stats = []
+    theta_p_values = []
+    for resi in residues:
+        residue_fits = fit_points.copy()[fit_points.residue == resi]
+        theta_est = minimize( csp_trajectory, np.pi/4, args=(residue_fits, nh_scale), method='L-BFGS-B' ).x[0]
+        theta_sumsq = csp_trajectory(theta_est,residue_fits,nh_scale)
+
+        theta_F_stat = ( ( np.sum( np.square( (residue_fits['15N'] - residue_fits['15N_ref'])*nh_scale ) + 
+                                   np.square( residue_fits['1H'] - residue_fits['1H_ref'] ) ) - theta_sumsq )/2 )/(
+                         theta_sumsq/(len(residue_fits)-4) )
+
+        theta_p_value = 1 - stats.f.cdf(theta_F_stat, 2, len(residue_fits)-4)
+
+        thetas.append(theta_est)
+        theta_F_stats.append(theta_F_stat)
+        theta_p_values.append(theta_p_value)
     
-    print('\n---  Phase 5: Generating output files  ---\n')
+    optimizer.thetas = thetas
+    optimizer.theta_F = theta_F_stats
+    optimizer.theta_up = theta_p_values
     
-    ## Generate a CSV with confidence intervals for all of the delta_w's
+    
+    
+    print('\n---  Phase 6: Output file generation  ---\n')
+    
+    ## Generate a CSV with confidence intervals for all of the delta_w's and trajectories if available
     alpha = 100.0*(1-config.confidence)/2
-    dfs = pd.DataFrame({'residue':residues,'delta_w':optimizer.ml_model[gvs:]/larmor,
-                        'conf_limit_'+str(round(alpha,1)):optimizer.lower_conf_limits[gvs:],
-                        'conf_limit_'+str(round(100-alpha,1)):optimizer.upper_conf_limits[gvs:]})
+    deltaw_df = pd.DataFrame({'residue':residues,'delta_w':optimizer.ml_model[gvs:]/larmor,
+                              'conf_limit_'+str(round(alpha,1)):optimizer.lower_conf_limits[gvs:],
+                              'conf_limit_'+str(round(100-alpha,1)):optimizer.upper_conf_limits[gvs:],
+                              'estimated_theta':optimizer.thetas, 'theta_F_stat':optimizer.theta_F,
+                              'uncorrected_theta_p_value':optimizer.theta_up})
+    deltaw_df['corrected_theta_p_value'] = deltaw_df.uncorrected_theta_p_value * len(residues) / deltaw_df.uncorrected_theta_p_value.rank(ascending=False)
+    optimizer.deltaw_df = deltaw_df
+    
     ## Print out data
     csv_name = os.path.join(config.output_dir, fname_prefix + '_CompLEx_deltaw.csv')
     txt_name = os.path.join(config.output_dir, fname_prefix+'_CompLEx_deltaw.txt')
-    dfs.to_csv(csv_name,index=False)
-    dfs[['residue','delta_w']].to_csv(txt_name, index=False,header=False)
+    deltaw_df.to_csv(csv_name,index=False)
+    deltaw_df[['residue','delta_w']].to_csv(txt_name, index=False,header=False)
     
-    ## Spit out the fit points
+    ## Record the fit points to a file
     fit_points_name = os.path.join(config.output_dir, fname_prefix+'_CompLEx_fit_points.csv')
-    optimizer.mode = 'pfitter'
-    fit_points = optimizer.fitness()
     fit_points.to_csv(fit_points_name, index=False)
     
     #Make a folder for figures
     image_dir = os.path.join(config.output_dir,'images')
     make_output_dir( image_dir )
     
+    ## Generate summary PDF
     summary_pdf = CompLEx_Report(optimizer, config, performance, lam, pygmo_seed, image_dir)
     summary_pdf_name = os.path.join(config.output_dir, fname_prefix + '_CompLEx_summary.pdf')
     summary_pdf.output(summary_pdf_name)

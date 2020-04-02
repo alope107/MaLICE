@@ -3,6 +3,7 @@ import numpy as np, pandas as pd
 import scipy.stats as stats
 from scipy.optimize import minimize
 from matplotlib import pyplot as plt
+from matplotlib.patches import Ellipse
 import matplotlib.cm as cm
 import matplotlib.colors as colors
 from fpdf import fpdf, FPDF
@@ -36,7 +37,7 @@ class CompLEx_PDF(FPDF):
         self.cell(0, 0, page, 0, 0, 'C')
 
 
-def generate_sim_spectrum(optimizer, fit_peaks, larmor, residue, theta, theta_se, titrant_concs, color_palette, figure_path):
+def generate_sim_spectrum(optimizer, fit_peaks, larmor, residue, titrant_concs, color_palette, background_palette, figure_path):
     # Sample sparky dictionary
     udic = {'ndim': 2,
             0: {'car': larmor*0.10137*119,
@@ -70,8 +71,8 @@ def generate_sim_spectrum(optimizer, fit_peaks, larmor, residue, theta, theta_se
     uc_1H = ng.sparky.make_uc(dic, None, 1)
     
     #set contour levels
-    #contour_start = optimizer.data.intensity.min()*10
-    contour_start = optimizer.reference.I_ref.min()/5
+    contour_start = optimizer.data.intensity.min()/5
+    #contour_start = optimizer.reference.I_ref.min()/5
     contour_num = 15
     contour_factor = 1.2
     contour_levels = contour_start * contour_factor ** np.arange(contour_num)
@@ -80,36 +81,151 @@ def generate_sim_spectrum(optimizer, fit_peaks, larmor, residue, theta, theta_se
     
     
     max_csp = float(max([fit_peaks.csp.max(), fit_peaks.csfit.max()]))
+    
     ## Overwrite with max_dw
-    #max_csp = float(fit_peaks.dw.max())/larmor
     if max_csp < 0.15:   max_csp = 0.15
-    
-    
-    
-    
+
     h_ref = float(optimizer.reference.loc[optimizer.reference.residue == residue, '1H_ref'])
     n_ref = float(optimizer.reference.loc[optimizer.reference.residue == residue, '15N_ref'])
-    
-    focal_peaks = fit_peaks.copy()[fit_peaks.residue == residue]
-    nonfocal_peaks = fit_peaks.copy()[(fit_peaks.residue != residue) &
-                                      (fit_peaks.titrant == fit_peaks.titrant.min())]
-    
-    ## For the moment, let's just let everything be at a vertical 45deg angle for simplicity
     amplitude_scaler = optimizer.ml_model[3]
-    
-    
-    
     ## Initialize the figure
     fig, ax = plt.subplots(figsize=(3.1,3.1))
-    ax.set(xlim=(h_ref+1.2*max_csp, h_ref-1.2*max_csp),
-           ylim=(n_ref+1.2*max_csp/optimizer.nh_scale, n_ref-1.2*max_csp/optimizer.nh_scale))
+    ax.set(xlim=(h_ref+1.6*max_csp, h_ref-1.6*max_csp),
+           ylim=(n_ref+1.6*max_csp/optimizer.nh_scale, n_ref-1.6*max_csp/optimizer.nh_scale))
     ax.set_title('Simulated $^{15}$N-HSQC',fontsize=10)
     ax.set_xlabel('$^1$H (ppm)', fontsize=8)
     ax.set_ylabel('$^{15}$N (ppm)', fontsize=8)
     ax.tick_params(labelsize=7)
     
+
+    ## 200325 Want to change the way that I draw the peaks all together
+    ## Instead of simulated peaks (which confuses everyone), now going to draw "real" spectra with linewidths
+    ## just inferred from the user input data. But let's try drawing the entire titration series first using
+    ## a grey color series, and then layer on the colored focal peaks (making the grey for that residue invisible).
+    
+    # Draw background
+    zorder = 0
+    background_colors = dict(zip(titrant_concs,background_palette))
+    for titrant_conc in titrant_concs:
+        background_params = []
+        #data_at_conc = fit_peaks.copy()[fit_peaks.titrant == titrant_conc]
+        background_intensities = []
+        for bg_residue in list(fit_peaks[fit_peaks.titrant == titrant_conc].residue.unique()):
+            bg_focal_peak = fit_peaks.copy()[(fit_peaks.titrant == titrant_conc) & (fit_peaks.residue == bg_residue)]
+            if not np.isnan(bg_focal_peak.intensity.iloc[0]):
+                bg_focal_intensity = float(bg_focal_peak.intensity.mean())
+                background_intensities.append(bg_focal_intensity)
+                n_loc = float(bg_focal_peak['15N'])
+                pts_15N = uc_15N.f(n_loc, 'ppm')
+                h_loc = float(bg_focal_peak['1H'])
+                pts_1H = uc_1H.f(h_loc, 'ppm')
+
+                lw_Hz = amplitude_scaler/bg_focal_intensity
+                lw_1H = lw_Hz/udic[1]['sw']*udic[1]['size']
+                lw_15N = lw_Hz/udic[0]['sw']*udic[0]['size']*optimizer.nh_scale
+
+                background_params.append([(pts_15N, lw_15N), (pts_1H, lw_1H)])
+
+        #background_intensities = list(data_at_conc.intensity)
+        simulated_background_data = ng.linesh.sim_NDregion(shape,
+                                                           lineshapes,
+                                                           background_params,
+                                                           background_intensities)
+        
+        # Make ppm scales
+        background_uc_1h = ng.sparky.make_uc(dic, simulated_background_data, dim=1)
+        background_ppm_1h = background_uc_1h.ppm_scale()
+        background_ppm_1h_0, background_ppm_1h_1 = background_uc_1h.ppm_limits()
+        background_uc_15n = ng.sparky.make_uc(dic, simulated_background_data, dim=0)
+        background_ppm_15n = background_uc_15n.ppm_scale()
+        background_ppm_15n_0, background_ppm_15n_1 = background_uc_15n.ppm_limits()
+
+        zorder += 1
+
+        ax.contour(simulated_background_data, contour_levels, 
+                   colors = [background_colors[titrant_conc]],
+                   extent=(background_ppm_1h_0, background_ppm_1h_1, 
+                           background_ppm_15n_0, background_ppm_15n_1),
+                   linewidths=contour_linewidth, zorder=zorder)
+    
+    #Draw focal residue
+    focal_peaks = fit_peaks.copy()[fit_peaks.residue == residue]
+    #focal_peaks['15N_ref'] = float(optimizer.reference.loc[optimizer.reference.residue == residue,'15N_ref'])
+    #focal_peaks['1H_ref'] = float(optimizer.reference.loc[optimizer.reference.residue == residue,'1H_ref'])
+    titrant_colors = dict(zip(titrant_concs,color_palette))
+    for titrant_conc in titrant_concs:
+        focal_peak = focal_peaks.copy()[focal_peaks.titrant == titrant_conc]
+        focal_intensity = [float(focal_peak.intensity.mean())]
+        
+        pt_15N = uc_15N.f(float(focal_peak['15N']), 'ppm')
+        pt_1H = uc_1H.f(float(focal_peak['1H']), 'ppm')
+        
+        lw_Hz = amplitude_scaler/float(focal_peak.intensity)
+        lw_1H = lw_Hz/udic[1]['sw']*udic[1]['size']
+        lw_15N = lw_Hz/udic[0]['sw']*udic[0]['size']*optimizer.nh_scale
+        
+        focal_param = [[(pt_15N, lw_15N), (pt_1H, lw_1H)]]
+
+        simulated_focal_data = ng.linesh.sim_NDregion(shape,
+                                                      lineshapes,
+                                                      focal_param,
+                                                      focal_intensity)
+        
+        # make ppm scales
+        focal_uc_1h = ng.sparky.make_uc(dic, simulated_focal_data, dim=1)
+        focal_ppm_1h = focal_uc_1h.ppm_scale()
+        focal_ppm_1h_0, focal_ppm_1h_1 = focal_uc_1h.ppm_limits()
+        focal_uc_15n = ng.sparky.make_uc(dic, simulated_focal_data, dim=0)
+        focal_ppm_15n = focal_uc_15n.ppm_scale()
+        focal_ppm_15n_0, focal_ppm_15n_1 = focal_uc_15n.ppm_limits()
+
+        zorder+=1
+
+        ax.contour(simulated_focal_data, contour_levels, 
+                   colors = [titrant_colors[titrant_conc]],
+                   extent=(focal_ppm_1h_0, focal_ppm_1h_1, focal_ppm_15n_0, focal_ppm_15n_1),
+                   linewidths=contour_linewidth, zorder=zorder)
     
     
+
+    # Add the CompLEx estimated values to plot
+    theta = float(optimizer.deltaw_df.estimated_theta[optimizer.deltaw_df.residue == residue])
+    zorder+=1
+    focal_peaks['15N_fit'] = focal_peaks['15N_ref'] + focal_peaks.csfit*np.sin(theta)/optimizer.nh_scale
+    focal_peaks['1H_fit'] = focal_peaks['1H_ref'] + focal_peaks.csfit*np.cos(theta)  
+    ax.scatter('1H_fit', '15N_fit', data=focal_peaks, c=color_palette, s=48, zorder=zorder,
+               edgecolors='black', linewidth=1.2)
+    
+    ## If the delta_w is sufficiently large, draw a dotted line around where the end point
+    ## should end up being
+    
+    focal_delta_w = float(optimizer.deltaw_df.delta_w[optimizer.deltaw_df.residue == residue])
+    focal_theta_p = float(optimizer.deltaw_df.corrected_theta_p_value[optimizer.deltaw_df.residue == residue])
+    if focal_theta_p < 0.05 or focal_delta_w >= 0.05:
+        zorder+=1
+        ax.add_artist(Ellipse((h_ref,n_ref), 2*focal_delta_w, 2*focal_delta_w/optimizer.nh_scale,
+                              linestyle='dashed', fill=0, color='black', zorder=zorder))
+    
+    ## Add a trajectory line in theta was estimated to be significant
+    
+    if focal_theta_p < 0.05:
+        H_traj = focal_peaks['1H_ref'].mean() + np.linspace(0, focal_delta_w, 1000)*np.cos(theta)
+        N_traj = focal_peaks['15N_ref'].mean() + np.linspace(0, focal_delta_w, 1000)*np.sin(theta)/optimizer.nh_scale
+
+        zorder+=1
+        ax.plot(H_traj, N_traj, linestyle='solid', c='black', linewidth=1, zorder=zorder)
+    
+    fig.tight_layout(pad=0.3)
+    
+    file_name = 'simulated_hsqc_residue_'+str(residue)+'.jpg'
+    
+    fig.savefig(os.path.join(figure_path, file_name), dpi=300, quality=80)
+    plt.close(fig)
+    
+    return file_name
+
+
+    '''
     ## Start by drawing the non-focal residue peaks
     nonfocal_params = []
     for nonfocal_residue in nonfocal_peaks.residue:
@@ -156,12 +272,12 @@ def generate_sim_spectrum(optimizer, fit_peaks, larmor, residue, theta, theta_se
     # Now loop over the focal residue at each titrant concentration
     focal_peaks['15N_fit'] = focal_peaks['15N_ref'] - focal_peaks.csfit*np.sin(theta)/optimizer.nh_scale
     focal_peaks['1H_fit'] = focal_peaks['1H_ref'] - focal_peaks.csfit*np.cos(theta)   
-    '''
+    
     tit_concs = list(focal_peaks.tit.unique())
     tit_concs.sort()
     
     
-    '''
+    
     # Use the new color palette variable that I'm passing in
     titrant_colors = dict(zip(titrant_concs,color_palette))
     for titrant_conc in titrant_concs:
@@ -223,15 +339,9 @@ def generate_sim_spectrum(optimizer, fit_peaks, larmor, residue, theta, theta_se
     ht = h_ref + dw*np.cos(xt)
     nt = n_ref + dw*np.sin(xt)/optimizer.nh_scale
     ax.plot(ht,nt,linestyle='dashed',c='black',linewidth=0.5)
-    
-    fig.tight_layout(pad=0.3)
-    
-    file_name = 'simulated_hsqc_residue_'+str(residue)+'.png'
-    
-    fig.savefig(os.path.join(figure_path, file_name),dpi=300)
-    plt.close(fig)
-    
-    return file_name
+    '''
+
+
 
 # Sets the directory fpdf searches for fonts
 def set_font_dir():
@@ -420,10 +530,10 @@ def CompLEx_Report(optimizer, config, performance, lam, seed, image_dir):
            xlim=(deltaw_df.residue.min()-1,deltaw_df.residue.max()+1),
            ylim = (-0.02, 1.05*max(optimizer.upper_conf_limits[optimizer.gvs:])/optimizer.larmor))
     fig.tight_layout(pad=0.3)
-    fig.savefig(os.path.join(image_dir,'deltaw_plot.png'),dpi=600)
+    fig.savefig(os.path.join(image_dir,'deltaw_plot.jpg'), dpi=300, quality=80)
     plt.close(fig)
     
-    pdf.image(os.path.join(image_dir,'deltaw_plot.png'), x = pdf.get_x(), y=pdf.get_y(),
+    pdf.image(os.path.join(image_dir,'deltaw_plot.jpg'), x = pdf.get_x(), y=pdf.get_y(),
               w = 7.5, h = 4.5)
     
     
@@ -477,8 +587,12 @@ def CompLEx_Report(optimizer, config, performance, lam, seed, image_dir):
     blue_red = colors.LinearSegmentedColormap('blue_red', segmentdata=blue_red_cdict, N=256)
     
     plasma_short = truncate_colormap(cm.plasma, minval=0.2, maxval=0.8, n=256)
-    
+    grey_short = truncate_colormap(cm.Greys_r, minval=0.5, maxval=0.9, n=256)
+    viridis_short = truncate_colormap(cm.viridis, minval=0.1, maxval=0.4, n=256)
+
     plasma_titrant = plasma_short( np.array(titrant_concs)/max(titrant_concs)  )
+    grey_titrant = grey_short( np.array(titrant_concs)/max(titrant_concs) )
+    viridis_titrant = viridis_short( np.array(titrant_concs)/max(titrant_concs) )
     
     residue_dw_df = pd.DataFrame({'residue':optimizer.residues,
                                   'dw':optimizer.ml_model[optimizer.gvs:],
@@ -498,7 +612,7 @@ def CompLEx_Report(optimizer, config, performance, lam, seed, image_dir):
         residue_data = optimizer.data.loc[optimizer.data.residue == residue,['15N','1H']]
         residue_ref = optimizer.reference[optimizer.reference.residue == residue]
         
-        residue_fits = fit_points[fit_points.residue == residue]
+        residue_fits = fit_points.copy()[fit_points.residue == residue]
         residue_regression = regression[regression.residue == residue]
         
         #residue_lower_regression = lower_cl_regression[lower_cl_regression.residue == residue]
@@ -559,27 +673,31 @@ def CompLEx_Report(optimizer, config, performance, lam, seed, image_dir):
             
         pdf.image(fig_path, x=pdf.get_x(), y=pdf.get_y(), w=2.5, h=3.1)
         
-        
-        
-        
-        
-        ## Generate the simulated spectra based on CompLEx parameter estimates
-        
+        # Estimate angle of CSP 
+        '''
         def csp_fitter(theta):
-            return np.sum(  np.square( (residue_fits['15N']-residue_fits['15N_ref']) - residue_fits.csfit*np.sin(theta)/0.2 ) +
-                            np.square( (residue_fits['1H']-residue_fits['1H_ref']) - residue_fits.csfit*np.cos(theta) )   )
-        
+                return np.sum(  np.square( (residue_fits['15N']-residue_fits['15N_ref']) - residue_fits.csfit*np.sin(theta)/optimizer.nh_scale ) +
+                                np.square( (residue_fits['1H']-residue_fits['1H_ref']) - residue_fits.csfit*np.cos(theta) )   )
+            
         theta_est = minimize( csp_fitter, np.pi/4, method='L-BFGS-B' ).x[0]
-        
+
+        theta_F_stat = ( ( np.sum( np.square( residue_fits['15N'] - residue_fits['15N_ref'] ) + 
+                                   np.square( residue_fits['1H'] - residue_fits['1H_ref'] ) )  -
+                           csp_fitter(theta_est) )/2 )/( csp_fitter(theta_est)/(len(residue_fits)-4) )
+
+        theta_p_value = 1 - stats.f.cdf(theta_F_stat, 2, len(residue_fits)-4)
+        '''
+
         # Add the simulated spectrum figure
         figure_name = generate_sim_spectrum(optimizer, 
                                             regression_at_titrant_concs, 
                                             optimizer.larmor, 
                                             residue,
-                                            theta_est,
-                                            0,
+                                            #theta_est,
+                                            #theta_p_value,
                                             titrant_concs,
-                                            plasma_titrant, 
+                                            plasma_titrant,
+                                            viridis_titrant, 
                                             image_dir)
         pdf.image(os.path.join(image_dir,figure_name), x = pdf.get_x()+2.5, y=pdf.get_y(),
               w = 3.1, h = 3.1)
