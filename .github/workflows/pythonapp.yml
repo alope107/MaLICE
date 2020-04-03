@@ -1,5 +1,13 @@
-name: 'Run Tests'
-description: 'Run the tests in the dockerfile'
-runs:
-  using: 'docker'
-  image: 'TestingDockerfile'
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+
+  build:
+
+    runs:
+      using: 'docker'
+      image: 'TestingDockerfile'
