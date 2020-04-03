@@ -8,4 +8,4 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      uses: .github/actions/action.yml
+    - uses: .github/actions/action.yml
