@@ -1,0 +1,6 @@
+# action.yml
+name: 'Run Tests'
+description: 'Runs tests via the dockerfie'
+runs:
+  using: 'docker'
+  image: 'TestingDockerfile'

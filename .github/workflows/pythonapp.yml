@@ -5,9 +5,7 @@ on:
     branches: [ master ]
 
 jobs:
-
   build:
-
-    runs:
-      using: 'docker'
-      image: 'TestingDockerfile'
+    runs-on: ubuntu-latest
+    steps:
+      uses: .github/actions/action.yml
