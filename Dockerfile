@@ -1,6 +1,6 @@
 FROM python:3.7-buster
 
-COPY requirements.txt /
+COPY complex/requirements.txt /
 
 RUN pip install -r /requirements.txt
 
@@ -10,9 +10,7 @@ ENV PYTHONUNBUFFERED=1
 
 ENV PYTHONPATH=/app/src
 
-COPY . /app
+COPY complex /app
 WORKDIR /app
 
 CMD ["pytest"]
-
-# TODO: Restore old Dockerfile and find a new home for this one
