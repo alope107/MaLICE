@@ -23,3 +23,7 @@ class TestOptimizer(TestCase):
         bounds = ([1, 2, 3], [4, 5, 6])
         optimizer.set_bounds(bounds)
         self.assertEqual(bounds,optimizer.get_bounds())
+
+
+    def test_bad(self):
+        self.assertEqual(2+2, 5)
