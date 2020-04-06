@@ -71,7 +71,8 @@ def generate_sim_spectrum(optimizer, fit_peaks, larmor, residue, titrant_concs, 
     uc_1H = ng.sparky.make_uc(dic, None, 1)
     
     #set contour levels
-    contour_start = optimizer.data.intensity.min()/5
+    #contour_start = optimizer.data.intensity.min()/5
+    contour_start = optimizer.data.intensity.median()/20
     #contour_start = optimizer.reference.I_ref.min()/5
     contour_num = 15
     contour_factor = 1.2
@@ -223,124 +224,6 @@ def generate_sim_spectrum(optimizer, fit_peaks, larmor, residue, titrant_concs, 
     plt.close(fig)
     
     return file_name
-
-
-    '''
-    ## Start by drawing the non-focal residue peaks
-    nonfocal_params = []
-    for nonfocal_residue in nonfocal_peaks.residue:
-        n_loc = float(nonfocal_peaks.loc[nonfocal_peaks.residue == nonfocal_residue, '15N_ref'])
-        pts_15N = uc_15N.f(n_loc, 'ppm')
-        h_loc = float(nonfocal_peaks.loc[nonfocal_peaks.residue == nonfocal_residue, '1H_ref'])
-        pts_1H = uc_1H.f(h_loc, 'ppm')
-        
-        lw_Hz = amplitude_scaler/float(nonfocal_peaks.loc[nonfocal_peaks.residue == nonfocal_residue, 'I_ref'])
-        lw_1H = lw_Hz/udic[1]['sw']*udic[1]['size']
-        lw_15N = lw_Hz/udic[0]['sw']*udic[0]['size']*optimizer.nh_scale
-        
-        nonfocal_params.append([(pts_15N, lw_15N), (pts_1H, lw_1H)])
-    
-    nonfocal_intensities = list(nonfocal_peaks.ifit)
-    simulated_nonfocal_data = ng.linesh.sim_NDregion(shape,
-                                                     lineshapes,
-                                                     nonfocal_params,
-                                                     nonfocal_intensities)
-    # Make ppm scales
-    nonfocal_uc_1h = ng.sparky.make_uc(dic, simulated_nonfocal_data, dim=1)
-    nonfocal_ppm_1h = nonfocal_uc_1h.ppm_scale()
-    nonfocal_ppm_1h_0, nonfocal_ppm_1h_1 = nonfocal_uc_1h.ppm_limits()
-    nonfocal_uc_15n = ng.sparky.make_uc(dic, simulated_nonfocal_data, dim=0)
-    nonfocal_ppm_15n = nonfocal_uc_15n.ppm_scale()
-    nonfocal_ppm_15n_0, nonfocal_ppm_15n_1 = nonfocal_uc_15n.ppm_limits()
-    
-    greyscale = cm.Greys_r
-    dim_greyscale = truncate_colormap(greyscale, minval=0.55, maxval=1.0, n=256)
-    
-    zorder = 1
-    
-    #ax.contour(simulated_nonfocal_data, contour_levels, cmap=dim_greyscale,
-    #           extent=(nonfocal_ppm_1h_0, nonfocal_ppm_1h_1, nonfocal_ppm_15n_0, nonfocal_ppm_15n_1),
-    #           linewidths=contour_linewidth, zorder=zorder)
-    
-    ax.contour(simulated_nonfocal_data, contour_levels, colors = [greyscale(0.5)],
-               extent=(nonfocal_ppm_1h_0, nonfocal_ppm_1h_1, nonfocal_ppm_15n_0, nonfocal_ppm_15n_1),
-               linewidths=contour_linewidth, zorder=zorder)
-    
-    
-    
-    
-    # Now loop over the focal residue at each titrant concentration
-    focal_peaks['15N_fit'] = focal_peaks['15N_ref'] - focal_peaks.csfit*np.sin(theta)/optimizer.nh_scale
-    focal_peaks['1H_fit'] = focal_peaks['1H_ref'] - focal_peaks.csfit*np.cos(theta)   
-    
-    tit_concs = list(focal_peaks.tit.unique())
-    tit_concs.sort()
-    
-    
-    
-    # Use the new color palette variable that I'm passing in
-    titrant_colors = dict(zip(titrant_concs,color_palette))
-    for titrant_conc in titrant_concs:
-        focal_peak = focal_peaks[focal_peaks.titrant == titrant_conc]
-        focal_intensity = [float(focal_peak.ifit)]
-        
-        csp_15N = float( n_ref - focal_peak.csfit*np.sin(theta)/optimizer.nh_scale )
-        pt_15N = uc_15N.f(csp_15N, 'ppm')
-        csp_1H = float ( h_ref - focal_peak.csfit*np.cos(theta) )
-        pt_1H = uc_1H.f(csp_1H, 'ppm')
-        
-        lw_Hz = amplitude_scaler/float(focal_peak.ifit)
-        lw_1H = lw_Hz/udic[1]['sw']*udic[1]['size']
-        lw_15N = lw_Hz/udic[0]['sw']*udic[0]['size']*optimizer.nh_scale
-        
-        focal_param = [[(pt_15N, lw_15N), (pt_1H, lw_1H)]]
-
-        simulated_focal_data = ng.linesh.sim_NDregion(shape,
-                                                      lineshapes,
-                                                      focal_param,
-                                                      focal_intensity)
-        
-        # make ppm scales
-        focal_uc_1h = ng.sparky.make_uc(dic, simulated_focal_data, dim=1)
-        focal_ppm_1h = focal_uc_1h.ppm_scale()
-        focal_ppm_1h_0, focal_ppm_1h_1 = focal_uc_1h.ppm_limits()
-        focal_uc_15n = ng.sparky.make_uc(dic, simulated_focal_data, dim=0)
-        focal_ppm_15n = focal_uc_15n.ppm_scale()
-        focal_ppm_15n_0, focal_ppm_15n_1 = focal_uc_15n.ppm_limits()
-        
-        titrant_cdict = {'red':   [[0.0,  titrant_colors[titrant_conc][0], titrant_colors[titrant_conc][0]],
-                               [1.0,  1.0, 1.0]],
-                     'green': [[0.0,  titrant_colors[titrant_conc][1], titrant_colors[titrant_conc][1]],
-                               [1.0,  1.0, 1.0]],
-                     'blue':  [[0.0,  titrant_colors[titrant_conc][2], titrant_colors[titrant_conc][2]],
-                               [1.0,  1.0, 1.0]]}
-        titrant_cmap = colors.LinearSegmentedColormap('titrant_'+format(titrant_conc/max(titrant_concs),'.2g'), segmentdata=titrant_cdict, N=256)
-        
-        zorder+=1
-        #ax.contour(simulated_focal_data, contour_levels, cmap = titrant_cmap,
-        #       extent=(focal_ppm_1h_0, focal_ppm_1h_1, focal_ppm_15n_0, focal_ppm_15n_1),
-        #       linewidths=contour_linewidth, zorder=zorder)
-        ax.contour(simulated_focal_data, contour_levels, colors = [titrant_colors[titrant_conc]],
-               extent=(focal_ppm_1h_0, focal_ppm_1h_1, focal_ppm_15n_0, focal_ppm_15n_1),
-               linewidths=contour_linewidth, zorder=zorder)
-        #if tit_conc == max(tit_concs):
-        #    ax.text(h_ref-0.06,n_ref-0.25,'('+str(round(csp_15N-n_ref,1))+', '+str(round(csp_1H-h_ref,3))+')',fontsize=8)
-    
-    ## Add the original points to the spectrum
-    #ax.scatter('1H', '15N', data=focal_peaks, c='black', s=16, zorder=2)
-    zorder+=1
-    ax.scatter('1H', '15N', data=focal_peaks, c=color_palette, s=48, zorder=zorder,
-               edgecolors='black', linewidth=1.2)
-    
-    ## Draw a dotted line around where delta w is expected to be
-    xt = np.linspace(0,2*np.pi,1000)
-    #dw = float(list(focal_peaks.dw)[0])
-    dw = float(focal_peaks.dw.mean())
-    ht = h_ref + dw*np.cos(xt)
-    nt = n_ref + dw*np.sin(xt)/optimizer.nh_scale
-    ax.plot(ht,nt,linestyle='dashed',c='black',linewidth=0.5)
-    '''
-
 
 
 # Sets the directory fpdf searches for fonts

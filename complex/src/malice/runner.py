@@ -238,7 +238,7 @@ def parse_input(fname, larmor, nh_scale):
                         dtype = {'residue':np.int64,'15N':np.float64,
                                  '1H':np.float64,'intensity':np.float64,
                                  'titrant':np.float64,'visible':np.float64})
-    data = input.copy()
+    data = input.copy()[input.intensity > 0]
     
     residues = list(data.groupby('residue').groups.keys())
     reference_points = pd.DataFrame()
@@ -514,8 +514,8 @@ def run_malice(config):
     ## Generate a CSV with confidence intervals for all of the delta_w's and trajectories if available
     alpha = 100.0*(1-config.confidence)/2
     deltaw_df = pd.DataFrame({'residue':residues,'delta_w':optimizer.ml_model[gvs:]/larmor,
-                              'conf_limit_'+str(round(alpha,1)):optimizer.lower_conf_limits[gvs:],
-                              'conf_limit_'+str(round(100-alpha,1)):optimizer.upper_conf_limits[gvs:],
+                              'conf_limit_'+str(round(alpha,1)):np.array(optimizer.lower_conf_limits[gvs:])/larmor,
+                              'conf_limit_'+str(round(100-alpha,1)):np.array(optimizer.upper_conf_limits[gvs:])/larmor,
                               'estimated_theta':optimizer.thetas, 'theta_F_stat':optimizer.theta_F,
                               'uncorrected_theta_p_value':optimizer.theta_up})
     deltaw_df['corrected_theta_p_value'] = deltaw_df.uncorrected_theta_p_value * len(residues) / deltaw_df.uncorrected_theta_p_value.rank(ascending=False)
