@@ -42,3 +42,17 @@ class TestOptimizer(TestCase):
         expected_negLL = 787800164113.927
 
         self.assertAlmostEqual(actual_negLL, expected_negLL, places=3)
+
+    def test_refpeak_optimization_fitness(self):
+        params = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9])
+        l1_model = np.array([10, 11, 12, 13, 14, 15, 16, 17, 18])
+
+        optimizer = _test_object()
+        optimizer.l1_model = l1_model
+        optimizer.lam = 0.
+        optimizer.mode = "reference_optimization"
+        optimizer.cs_dist="rayleigh"
+
+        actual_negLL = optimizer.fitness(params)[0]
+        expected_negLL = 203403594105.92865
+        self.assertAlmostEqual(actual_negLL, expected_negLL, places=3)
