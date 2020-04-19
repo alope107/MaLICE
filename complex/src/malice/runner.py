@@ -1,7 +1,3 @@
-### MaLICE v200101
-
-## Import libraries
-
 import os, sys, itertools, time, datetime, concurrent, multiprocessing, copy
 import numpy as np, pandas as pd
 import scipy.stats as stats
@@ -157,12 +153,7 @@ def parse_input(fname, larmor, nh_scale):
         resdata = data.copy()[data.residue == res]
         ## Use the lowest titration point (hopefully zero) for the reference
         min_titrant_conc = resdata.titrant.min()
-        reference_points = reference_points.append(resdata.loc[resdata.titrant == min_titrant_conc,['residue','15N','1H','intensity']].mean(axis=0),ignore_index=True)
-        
-        #if len(list(resdata.titrant[resdata.titrant == min_titrant_conc])) == 1:
-        #    reference_points = reference_points.append(resdata.loc[resdata.titrant == min_titrant_conc,['residue','15N','1H','intensity']])
-        #else:
-            
+        reference_points = reference_points.append(resdata.loc[resdata.titrant == min_titrant_conc,['residue','15N','1H','intensity']].mean(axis=0),ignore_index=True) 
     
     return data, reference_points, residues
 
@@ -227,9 +218,7 @@ def run_malice(config):
     performance['current_time'] = time.time() - performance['start_time']
     print('\n\tCurrent run time = '+str(datetime.timedelta(seconds=performance['current_time'])).split('.')[0])
     
-    
-    
-    
+
     ## Stage 2 - reference peak optimization
     print('\n---  Phase 2: Reference peak optimization  ---\n')
     
@@ -282,9 +271,7 @@ def run_malice(config):
     performance['current_time'] = time.time() - performance['start_time']
     print('\n\tCurrent run time = '+str(datetime.timedelta(seconds=performance['current_time'])).split('.')[0])
     
-    
-    
-    
+
     ## Stage 3 - polish off the model with gradient minimization
     print('\n---  Phase 3: Final -logL minimization without regularization  ---\n')
     
@@ -330,8 +317,6 @@ def run_malice(config):
         if ml_opt_bounds_min[i] < l1_bounds_min[i]:    ml_opt_bounds_min[i] = l1_bounds_min[i]
         if ml_opt_bounds_max[i] > l1_bounds_max[i]:    ml_opt_bounds_max[i] = l1_bounds_max[i]
     optimizer.set_bounds((ml_opt_bounds_min,ml_opt_bounds_max))
-    
-    #optimizer.set_bounds((l1_bounds_min,l1_bounds_max))
     
     ml_opt_initial = list(scaled_dw_opt.x[:gvs]) + list(np.array(optimizer.l1_model[gvs:])*dw_scaler)
     
@@ -417,8 +402,6 @@ def run_malice(config):
     optimizer.thetas = thetas
     optimizer.theta_F = theta_F_stats
     optimizer.theta_up = theta_p_values
-    
-    
     
     print('\n---  Phase 6: Output file generation  ---\n')
     
