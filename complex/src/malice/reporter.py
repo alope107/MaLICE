@@ -1,14 +1,19 @@
-import os, sys, datetime
-import numpy as np, pandas as pd
-import scipy.stats as stats
-from scipy.optimize import minimize
+import datetime
+import os
+import pathlib
+import sys
+
+from fpdf import fpdf, FPDF
 from matplotlib import pyplot as plt
-from matplotlib.patches import Ellipse
 import matplotlib.cm as cm
 import matplotlib.colors as colors
-from fpdf import fpdf, FPDF
+from matplotlib.patches import Ellipse
 import nmrglue as ng
-import pathlib
+import numpy as np
+import pandas as pd
+import scipy.stats as stats
+from scipy.optimize import minimize
+
 from malice.resources import fonts
 
 

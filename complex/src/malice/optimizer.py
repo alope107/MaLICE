@@ -1,7 +1,8 @@
+import itertools
+
 import numpy as np
 import pandas as pd
 import scipy.stats as stats
-import itertools
 
 class MaliceOptimizer(object):
 

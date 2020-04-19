@@ -1,15 +1,24 @@
-import os, sys, itertools, time, datetime, concurrent, multiprocessing, copy
-import numpy as np, pandas as pd
-import scipy.stats as stats
-from scipy.optimize import minimize,basinhopping,differential_evolution,curve_fit
-from matplotlib import pyplot as plt
+import concurrent
+import copy
+import datetime
+import itertools
+import multiprocessing
+import concurrent.futures
+import os
+import sys
+import time 
+
+from fpdf import FPDF
+from matplotlib.backends.backend_pdf import PdfPages
 import matplotlib.cm as cm
 import matplotlib.colors as colors
-from matplotlib.backends.backend_pdf import PdfPages
-import concurrent.futures
-import pygmo as pg
-from fpdf import FPDF
+from matplotlib import pyplot as plt
 import nmrglue as ng
+import numpy as np
+import pandas as pd
+import pygmo as pg
+from scipy.optimize import minimize, basinhopping, differential_evolution, curve_fit
+import scipy.stats as stats
 
 from malice.optimizer import MaliceOptimizer
 from malice.reporter import CompLEx_Report
