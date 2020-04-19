@@ -1,10 +1,11 @@
-from malice import runner
-from malice.args import parse_args
+import os
+from zipfile import ZipFile
 
 import numpy as np
 import s3fs
-import os
-from zipfile import ZipFile
+
+from malice import runner
+from malice.args import parse_args
 
 def main():
     # Validate arguments

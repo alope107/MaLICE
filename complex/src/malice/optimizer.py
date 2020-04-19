@@ -1,7 +1,8 @@
+import itertools
+
 import numpy as np
 import pandas as pd
 import scipy.stats as stats
-import itertools
 
 class MaliceOptimizer(object):
 
@@ -24,7 +25,7 @@ class MaliceOptimizer(object):
             self.reference = pd.DataFrame()
             for res in self.residues:
                 resdata = self.data.copy()[self.data.residue == res]
-                self.reference = self.reference.append(resdata.loc[resdata.titrant == np.min(resdata.titrant),['residue','15N','1H','intensity']].mean(axis=0),ignore_index=True)
+                self.reference = self.reference.append(resdata.loc[resdata.titrant == np.min(resdata.titrant), ['residue','15N','1H','intensity']].mean(axis=0),ignore_index=True)
             self.reference = self.reference.rename(columns={'intensity':'I_ref','15N':'15N_ref','1H':'1H_ref'})
     
     def set_bounds(self, bds):
@@ -172,7 +173,3 @@ class MaliceOptimizer(object):
         negLL = -1*(logLL_int + logLL_cs - self.lam*np.sum(np.abs(df.dw)))
         
         return(negLL, )
-
-    def derivative(self, ):
-        ## Return the derivative for each variable in the 
-        return 0
