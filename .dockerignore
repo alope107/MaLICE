@@ -4,3 +4,4 @@
 **/*.pyd
 **/*.pkl
 .git
+env
