@@ -28,6 +28,11 @@ class MaliceOptimizer(object):
                 self.reference = self.reference.append(resdata.loc[resdata.titrant == np.min(resdata.titrant), ['residue','15N','1H','intensity']].mean(axis=0),ignore_index=True)
             self.reference = self.reference.rename(columns={'intensity':'I_ref','15N':'15N_ref','1H':'1H_ref'})
     
+    def delta_ws(self):
+        if self.ml_model is None:
+            return None
+        return self.ml_model[self.gvs:]/self.larmor
+    
     def set_bounds(self, bds):
         self.bounds = bds
         
