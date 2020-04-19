@@ -20,9 +20,11 @@ import pygmo as pg
 from scipy.optimize import minimize, basinhopping, differential_evolution, curve_fit
 import scipy.stats as stats
 
+from malice import mcmc
 from malice.optimizer import MaliceOptimizer
 from malice.reporter import CompLEx_Report
 from malice.args import parse_args
+
 
 def gen_pop1(optimizer):
     Kd_exp_random = list(np.random.random(1)*5-1)   # Will span from 100 nM to 10 mM
@@ -81,59 +83,6 @@ def truncate_colormap(cmap, minval=0.0, maxval=1.0, n=100):
         'trunc({n},{a:.2f},{b:.2f})'.format(n=cmap.name, a=minval, b=maxval),
         cmap(np.linspace(minval, maxval, n)))
     return new_cmap
-
-def mcmc_walker(optimizer, steps, confidence, min_global, max_global, seed, iterator=1, abort_threshold = 100):
-    
-    np.random.seed(seed = 9*seed + 89*iterator)
-    
-    walker = MaliceOptimizer(larmor = optimizer.larmor,
-                             gvs = optimizer.gvs,
-                             data = optimizer.data,
-                             mode = 'ml_optimization',
-                             nh_scale = optimizer.nh_scale,
-                             l1_model = optimizer.l1_model,
-                             reference = optimizer.reference,
-                             ml_model = optimizer.ml_model)
-    
-    min_mcmc = [walker.ml_model[0]-1, walker.ml_model[1]-1, walker.ml_model[2]-20, walker.ml_model[3]/4, 
-                walker.ml_model[4]/4, walker.ml_model[5]/4] + [0]*(len(walker.ml_model)-walker.gvs)
-    max_mcmc = [walker.ml_model[0]+1, walker.ml_model[1]+1, walker.ml_model[2]+20, walker.ml_model[3]*4, 
-                walker.ml_model[4]*4, walker.ml_model[5]*4] + [max(walker.ml_model[walker.gvs:])*5]*(len(walker.ml_model)-walker.gvs)
-    
-    # Fix any of the global bounds that go off into stupid places
-    for i in range(walker.gvs):
-        if min_mcmc[i] < min_global[i]:    min_mcmc[i] = min_global[i]
-        if max_mcmc[i] > max_global[i]:    max_mcmc[i] = max_global[i]
-    
-    tolerated_negLL = walker.fitness(walker.ml_model)[0] + stats.chi2.ppf(confidence,df=1)/2
-    
-    model = list(walker.ml_model)
-    accepted_steps = []
-    consecutive_failed = 0
-    for i in range(steps):
-        prev_model = list(model)
-        
-        # For global variables, allow it to walk randomly -/+ 0.4% and dw to move randomly -/+ 0.1 Hz
-        perturbation = list((np.random.random(walker.gvs)-0.5)/125*np.array(model[:walker.gvs])) + list((np.random.random(len(model[walker.gvs:]))-0.5)/5)
-        model = list(np.array(model) + perturbation)
-        
-        #Check bounds
-        for j in range(len(model)):
-            if model[j] < min_mcmc[j]:  model[j] = min_mcmc[j]
-            if model[j] > max_mcmc[j]:  model[j] = max_mcmc[j]
-        
-        if walker.fitness(model)[0] <= tolerated_negLL:
-            accepted_steps.append(list(model))
-            consecutive_failed = 0
-        else:
-            model = list(prev_model)
-            consecutive_failed += 1
-        
-        if consecutive_failed > abort_threshold:    break
-        
-    print('Walk #'+str(iterator+1)+': Accepted '+str(len(accepted_steps))+' of '+str(i+1)+' steps')
-    
-    return accepted_steps
 
 def csp_trajectory(theta, data_points, nh_scale):
     return np.sum(  np.square( (data_points['15N']-data_points['15N_ref'])*nh_scale - data_points.csfit*np.sin(theta) ) +
@@ -361,7 +310,7 @@ def run_malice(config):
     upper_conf_limits = []
     
     executor = concurrent.futures.ProcessPoolExecutor(config.num_threads)
-    futures = [executor.submit(mcmc_walker, optimizer, config.mcmc_steps, config.confidence, l1_bounds_min, l1_bounds_max, config.seed, k) for k in range(config.mcmc_walks)]
+    futures = [executor.submit(mcmc.walk, optimizer, config.mcmc_steps, config.confidence, l1_bounds_min, l1_bounds_max, config.seed, k) for k in range(config.mcmc_walks)]
     concurrent.futures.wait(futures)
     
     accepted_steps = []
