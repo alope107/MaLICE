@@ -4,6 +4,10 @@ import numpy as np
 import pandas as pd
 import scipy.stats as stats
 
+# Returns L1 norm of a vector scaled by the given factor.
+def regularization_penalty(lam, vector):
+    return lam * np.linalg.norm(vector, 1)
+
 class MaliceOptimizer(object):
 
     def __init__(self, larmor=500,gvs=6,lam=0.0,cs_dist='gaussian',nh_scale=0.2,data=None,resgrouped=None,residues=None,mode=None,l1_model=None,ml_model=None,reference=None,bootstrap=False):
@@ -41,6 +45,37 @@ class MaliceOptimizer(object):
     
     def get_scipy_bounds(self):
         return tuple([(self.bounds[0][x],self.bounds[1][x]) for x in range(len(self.bounds[0]))])
+
+    # Returns fits for chemical shift and intensity
+    def compute_fits(self, Kd_exp, koff_exp, dR2, amp_scaler, i_noise, cs_noise, df):
+        Kd = np.power(10, Kd_exp)
+        koff = np.power(10, koff_exp)
+        kon = koff/Kd
+        
+        dimer = ( (df.visible + df.titrant + Kd) - np.sqrt( np.power((df.visible + df.titrant + Kd),2) - 4*df.visible*df.titrant ) )/2
+        pb = dimer/df.visible
+        pa = 1 - pb
+        
+        #Assume 1:1 stoichiometry for now
+        free_titrant = df.titrant - dimer
+        kr = koff
+        kf = free_titrant * kon
+        kex = kr + kf
+        
+        #Adjust the amplitude if the visible concentration is not equal for all points
+        visibleconc = list(self.data.visible.drop_duplicates())
+        if len(visibleconc) > 1:
+            amp_scaler = amp_scaler*(self.data.visible/np.mean(visibleconc))
+        
+        broad_denom = np.square(np.square(kex) + (1-5*pa*pb)*np.square(df.dw)) + 4*pa*pb*(1-4*pa*pb)*np.power(df.dw,4)
+        
+        #Compute the fits
+        i_broad = pa*pb*np.square(df.dw)*kex * (np.square(kex)+(1-5*pa*pb)*np.square(df.dw))/broad_denom
+        ihat = df.I_ref/( pa + pb + df.I_ref*(pb*dR2 + i_broad)/amp_scaler)
+        cs_broad = pa*pb*(pa-pb)*np.power(df.dw,3) * (np.square(kex)+(1-3*pa*pb)*np.square(df.dw))/broad_denom
+        cshat = pb*df.dw - cs_broad
+
+        return cshat, ihat
     
     def fitness(self, params=None):
         if self.mode == 'ml_optimization':
@@ -50,7 +85,6 @@ class MaliceOptimizer(object):
         
         elif self.mode == 'reference_optimization':
             Kd_exp, koff_exp, dR2, amp_scaler, i_noise, cs_noise = self.l1_model[:self.gvs]
-            
             residue_params = pd.DataFrame({'residue':self.residues,'15N_ref':params[:int(len(params)/3)],
                                       '1H_ref':params[int(len(params)/3):2*int(len(params)/3)],
                                       'I_ref':params[2*int(len(params)/3):],'dw':self.l1_model[self.gvs:]})
@@ -115,40 +149,16 @@ class MaliceOptimizer(object):
             residue_params['dw'] = params[self.gvs:]
         
         else:
-            print('UNSUPPORTED OPTIMIZATION MODE')
-            return 0
+            raise NotImplementedError("Unsupported optimization mode " + str(self.mode))
         
-        if self.mode in ['lfitter','simulated_peak_generation']:   df = pd.merge(fitter_input, residue_params,on='residue')
-        else:   df = pd.merge(self.data,residue_params,on='residue')
+        if self.mode in ['lfitter','simulated_peak_generation']:
+            df = pd.merge(fitter_input, residue_params,on='residue')
+        else:   
+            df = pd.merge(self.data,residue_params,on='residue')
         
         if self.bootstrap == True:  df = df.sample(frac=1,replace=True)
-        
-        Kd = np.power(10,Kd_exp)
-        koff = np.power(10,koff_exp)
-        kon = koff/Kd
-        
-        dimer = ( (df.visible + df.titrant + Kd) - np.sqrt( np.power((df.visible + df.titrant + Kd),2) - 4*df.visible*df.titrant ) )/2
-        pb = dimer/df.visible
-        pa = 1 - pb
-        
-        #Assume 1:1 stoichiometry for now
-        free_titrant = df.titrant - dimer
-        kr = koff
-        kf = free_titrant*kon
-        kex = kr + kf
-        
-        #Adjust the amplitude if the visible concentration is not equal for all points
-        visibleconc = list(self.data.visible.drop_duplicates())
-        if len(visibleconc) > 1:
-            amp_scaler = amp_scaler*(self.data.visible/np.mean(visibleconc))
-        
-        broad_denom = np.square(np.square(kex) + (1-5*pa*pb)*np.square(df.dw)) + 4*pa*pb*(1-4*pa*pb)*np.power(df.dw,4)
-        
-        #Compute the fits
-        i_broad = pa*pb*np.square(df.dw)*kex * (np.square(kex)+(1-5*pa*pb)*np.square(df.dw))/broad_denom
-        ihat = df.I_ref/( pa + pb + df.I_ref*(pb*dR2 + i_broad)/amp_scaler )
-        cs_broad = pa*pb*(pa-pb)*np.power(df.dw,3) * (np.square(kex)+(1-3*pa*pb)*np.square(df.dw))/broad_denom
-        cshat = pb*df.dw - cs_broad
+
+        cshat, ihat = self.compute_fits(Kd_exp, koff_exp, dR2, amp_scaler, i_noise, cs_noise, df)
         
         if self.mode == 'lfitter':
             df['ifit'] = ihat
@@ -164,6 +174,7 @@ class MaliceOptimizer(object):
             return df
     
         
+        
         #Compute the likelihoods
         logLL_int = np.sum( stats.norm.logpdf(df.intensity, loc=ihat, scale=i_noise) )
         
@@ -175,6 +186,6 @@ class MaliceOptimizer(object):
             print('INVALID CS DISTRIBUTION')
             return 0
         
-        negLL = -1*(logLL_int + logLL_cs - self.lam*np.sum(np.abs(df.dw)))
+        negLL = -1*(logLL_int + logLL_cs - regularization_penalty(self.lam, df.dw))
         
         return(negLL, )
