@@ -7,6 +7,7 @@ import s3fs
 from malice import runner
 from malice.args import parse_args
 
+
 def main():
     # Validate arguments
     args = parse_args()
@@ -15,7 +16,7 @@ def main():
 
     # Run malice
     runner.main()
-    
+
     # collect all output files
     paths = get_all_file_paths(args.output_dir)
 
@@ -30,6 +31,7 @@ def main():
     print("Finished!")
     # TODO: Remove zip file
 
+
 def upload_to_s3(base_name, zip_name, s3_prefix):
     s3 = s3fs.S3FileSystem(anon=False)
     key_name = s3_prefix + "/" + base_name
@@ -39,6 +41,7 @@ def upload_to_s3(base_name, zip_name, s3_prefix):
         with open(zip_name, 'rb') as local_f:
             s3_f.write(local_f.read())
 
+
 def zip_file(zip_name, paths):
     with ZipFile(zip_name, "w") as zip:
         print("Zipping these files:")
@@ -46,22 +49,21 @@ def zip_file(zip_name, paths):
             print(path)
             zip.write(path)
 
-# Adapted from https://www.geeksforgeeks.org/working-zip-files-python/
-def get_all_file_paths(directory): 
-  
-    # initializing empty file paths list 
-    file_paths = [] 
-  
-    # crawling through directory and subdirectories 
-    for root, _, files in os.walk(directory): 
-        for filename in files: 
-            # join the two strings in order to form the full filepath. 
-            filepath = os.path.join(root, filename) 
-            file_paths.append(filepath) 
-  
-    # returning all file paths 
-    return file_paths 
 
+# Adapted from https://www.geeksforgeeks.org/working-zip-files-python/
+def get_all_file_paths(directory):
+    # initializing empty file paths list
+    file_paths = []
+
+    # crawling through directory and subdirectories
+    for root, _, files in os.walk(directory):
+        for filename in files:
+            # join the two strings in order to form the full filepath.
+            filepath = os.path.join(root, filename)
+            file_paths.append(filepath)
+
+    # returning all file paths
+    return file_paths
 
 
 if __name__ == "__main__":
