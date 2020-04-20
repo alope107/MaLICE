@@ -1,7 +1,6 @@
 import os
 from zipfile import ZipFile
 
-import numpy as np
 import s3fs
 
 from malice import runner
@@ -43,11 +42,11 @@ def upload_to_s3(base_name, zip_name, s3_prefix):
 
 
 def zip_file(zip_name, paths):
-    with ZipFile(zip_name, "w") as zip:
+    with ZipFile(zip_name, "w") as new_zip:
         print("Zipping these files:")
         for path in paths:
             print(path)
-            zip.write(path)
+            new_zip.write(path)
 
 
 # Adapted from https://www.geeksforgeeks.org/working-zip-files-python/

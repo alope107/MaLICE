@@ -1,30 +1,19 @@
 import concurrent
-import copy
-import datetime
-import itertools
-import multiprocessing
 import concurrent.futures
+import datetime
 import os
-import sys
 import time
 
-from fpdf import FPDF
-from matplotlib.backends.backend_pdf import PdfPages
-import matplotlib.cm as cm
 import matplotlib.colors as colors
-from matplotlib import pyplot as plt
-import nmrglue as ng
 import numpy as np
 import pandas as pd
 import pygmo as pg
-from scipy.optimize import minimize, basinhopping
-from scipy.optimize import differential_evolution, curve_fit
+from scipy.optimize import minimize
 import scipy.stats as stats
 
 from malice import mcmc
 from malice.optimizer import MaliceOptimizer
 from malice.output import create_output_files, make_output_dir
-from malice.reporter import CompLEx_Report
 from malice.args import parse_args
 
 
@@ -116,15 +105,14 @@ def main():
     run_malice(args)
 
 
-def parse_input(fname, larmor, nh_scale):
-    input = pd.read_csv(fname,
+def parse_input(fname):
+    data = pd.read_csv(fname,
                         dtype={'residue': np.int64,
                                '15N': np.float64,
                                '1H': np.float64,
                                'intensity': np.float64,
                                'titrant': np.float64,
                                'visible': np.float64})
-    data = input.copy()
 
     residues = list(data.groupby('residue').groups.keys())
     reference_points = pd.DataFrame()
@@ -152,8 +140,7 @@ def run_malice(config):
     pygmo_seed = 2*config.seed - 280
     pg.set_global_rng_seed(seed=pygmo_seed)
 
-    user_data, initial_reference, residues = parse_input(config.input_file,
-                                                         larmor, nh_scale)
+    user_data, initial_reference, residues = parse_input(config.input_file)
 
     i_noise_est = np.mean(user_data.intensity)/10
 
