@@ -1,9 +1,9 @@
+from io import StringIO
 from unittest import TestCase
+
 import pandas as pd
 from pandas.testing import assert_series_equal
 import numpy as np
-from numpy.testing import assert_allclose
-from io import StringIO
 
 from malice.optimizer import MaliceOptimizer, regularization_penalty
 
@@ -74,9 +74,9 @@ class TestOptimizer(TestCase):
         # TODO(auberon): Refactor so this logic doesn't need to be in the test
         residue_params = optimizer.reference.copy()
         residue_params['dw'] = np.array([7, 8, 9])
-        df = pd.merge(optimizer.data,residue_params,on='residue')
+        df = pd.merge(optimizer.data, residue_params, on='residue')
 
-        actual_cshat, actual_ihat = optimizer.compute_fits(1, 2, 3, 4, 5, 6, df)
+        actual_cshat, actual_ihat = optimizer.compute_fits(1, 2, 3, 4, df)
         expected_cshat = pd.Series([0., 0.343206, 0., 0.391781, 0., 0.440175])
         expected_ihat = pd.Series([3.248421e+06, 2.361621e+01, 5.053537e+06, 
                                    2.272775e+01, 2.062229e+06, 2.180010e+01])

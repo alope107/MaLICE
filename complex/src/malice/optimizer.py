@@ -13,8 +13,8 @@ def regularization_penalty(lam, vector):
 class MaliceOptimizer(object):
 
     def __init__(self, larmor=500, gvs=6, lam=0.0, cs_dist='gaussian',
-                 nh_scale=0.2, data=None, resgrouped=None, residues=None,
-                 mode=None, l1_model=None, ml_model=None, reference=None,
+                 nh_scale=0.2, data=None, mode=None, l1_model=None, 
+                 ml_model=None, reference=None,
                  bootstrap=False):
         self.larmor = larmor
         self.gvs = gvs
@@ -53,9 +53,8 @@ class MaliceOptimizer(object):
     def get_scipy_bounds(self):
         return tuple([(self.bounds[0][x], self.bounds[1][x]) for x in range(len(self.bounds[0]))])
 
-    # Returns fits for chemical shift and intensity
-    def compute_fits(self, Kd_exp, koff_exp, dR2, amp_scaler, i_noise,
-                     cs_noise, df):
+    # Returns fits for chemical shift and intensity!
+    def compute_fits(self, Kd_exp, koff_exp, dR2, amp_scaler, df):
         Kd = np.power(10, Kd_exp)
         koff = np.power(10, koff_exp)
         kon = koff/Kd
@@ -174,8 +173,7 @@ class MaliceOptimizer(object):
         if self.bootstrap:
             df = df.sample(frac=1, replace=True)
 
-        cshat, ihat = self.compute_fits(Kd_exp, koff_exp, dR2, amp_scaler,
-                                        i_noise, cs_noise, df)
+        cshat, ihat = self.compute_fits(Kd_exp, koff_exp, dR2, amp_scaler, df)
 
         if self.mode == 'lfitter':
             df['ifit'] = ihat
