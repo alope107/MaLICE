@@ -4,7 +4,6 @@ import datetime
 import os
 import time
 
-import matplotlib.colors as colors
 import numpy as np
 import pandas as pd
 import pygmo as pg
@@ -71,26 +70,6 @@ def pygmo_wrapper(optimizer, pop_generator, seed, islands, pop_size,
     best_model = archi.get_champions_x()[best_index]
 
     return best_model, best_score
-
-
-def gen_bspop(optimizer):
-    Kd_exp_pert = [optimizer.ml_model[0] + np.random.normal(0, 0.2)]
-    kex_exp_pert = [optimizer.ml_model[1] + np.random.normal(0, 0.2)]
-    dR2_pert = [optimizer.ml_model[2] + np.random.normal(0, 1)]
-    amp_scaler_pert = [optimizer.ml_model[3] + np.random.normal(0, optimizer.ml_model[3]/10)]
-    i_noise_pert = [optimizer.ml_model[4] + np.random.normal(0, optimizer.ml_model[4]/10)]
-    cs_noise_pert = [optimizer.ml_model[5] + np.random.normal(0, optimizer.ml_model[5]/10)]
-
-    dw_pert = list(np.array(optimizer.ml_model[optimizer.gvs:]) + np.random.normal(0, 3, len(optimizer.residues)))
-
-    return Kd_exp_pert + kex_exp_pert + dR2_pert + amp_scaler_pert + i_noise_pert + cs_noise_pert + dw_pert
-
-
-def truncate_colormap(cmap, minval=0.0, maxval=1.0, n=100):
-    new_cmap = colors.LinearSegmentedColormap.from_list(
-        'trunc({n},{a:.2f},{b:.2f})'.format(n=cmap.name, a=minval, b=maxval),
-        cmap(np.linspace(minval, maxval, n)))
-    return new_cmap
 
 
 def csp_trajectory(theta, data_points, nh_scale):
