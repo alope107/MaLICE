@@ -86,6 +86,14 @@ class MaliceOptimizer(object):
         cshat = pb*df.dw - cs_broad
 
         return cshat, ihat
+    
+    def observed_chemical_shift(self, nitrogen_ref, nitrogen,
+                                hydrogen_ref, hydrogen):
+        n_diff = nitrogen - nitrogen_ref
+        h_diff = hydrogen - hydrogen_ref
+        n_diff_scaled = self.nh_scale * n_diff
+        shift = np.sqrt(np.square(n_diff_scaled) + np.square(h_diff))
+        return self.larmor * shift
 
     def fitness(self, params=None):
         if self.mode == 'ml_optimization':
@@ -180,7 +188,7 @@ class MaliceOptimizer(object):
             df['csfit'] = cshat/self.larmor  # Return as ppm and not Hz
             return df
 
-        csobs = self.larmor*(np.sqrt(np.square(self.nh_scale*(df['15N'] - df['15N_ref'])) + np.square(df['1H'] - df['1H_ref'])))
+        csobs = self.observed_chemical_shift(df['15N_ref'], df['15N'], df['1H_ref'], df['1H'])
 
         if self.mode in ['pfitter', 'simulated_peak_generation']:
             df['csp'] = csobs/self.larmor  # Returns as ppm and not Hz
