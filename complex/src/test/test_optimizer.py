@@ -44,6 +44,24 @@ class TestOptimizer(TestCase):
         expected_negLL = 787800164113.927
 
         self.assertAlmostEqual(actual_negLL, expected_negLL, places=3)
+    
+    def test_observed_chemical_shift(self):
+        optimizer = _test_object()
+
+        optimizer.nh_scale = 4
+        optimizer.larmor = 10
+
+        nitrogen_ref = pd.Series([1, 2, 3])
+        nitrogen = pd.Series([6, 5, 4])
+        hydrogen_ref = pd.Series([10, 20, 30])
+        hydrogen = pd.Series([60, 50, 40])
+
+        actual_shift = optimizer.observed_chemical_shift(nitrogen_ref, 
+                                                         nitrogen,
+                                                         hydrogen_ref, 
+                                                         hydrogen)
+        expected_shift = pd.Series([538.5164807134504, 323.10988842807024, 107.70329614269008])
+        assert_series_equal(actual_shift, expected_shift, check_dtype=False)
 
     def test_refpeak_optimization_fitness(self):
         params = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9])
