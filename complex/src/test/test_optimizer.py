@@ -44,7 +44,42 @@ class TestOptimizer(TestCase):
         expected_negLL = 787800164113.927
 
         self.assertAlmostEqual(actual_negLL, expected_negLL, places=3)
-    
+
+    def test_refpeak_optimization_fitness(self):
+        params = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9])
+        l1_model = np.array([10, 11, 12, 13, 14, 15, 16, 17, 18])
+
+        optimizer = _test_object()
+        optimizer.l1_model = l1_model
+        optimizer.lam = 0.
+        optimizer.mode = "reference_optimization"
+        optimizer.cs_dist = "rayleigh"
+
+        actual_negLL = optimizer.fitness(params)[0]
+        expected_negLL = 203403594105.92865
+        self.assertAlmostEqual(actual_negLL, expected_negLL, places=3)
+
+    def test_dw_scale_optimization_fitness(self):
+        params = np.array([1, 2, 3, 4, 5, 6, 2, 7, 8, 9])
+        l1_model = np.array([10, 11, 12, 13, 14, 15, 6, 7, 8])
+
+        optimizer = _test_object()
+        optimizer.l1_model = l1_model
+        optimizer.lam = 0.
+        optimizer.mode = "dw_scale_optimization"
+        optimizer.cs_dist = "rayleigh"
+
+        # Add noise to each reference peak.
+        # When using rayleigh distribution, reference peaks cannot
+        # match observed peak because doing so would lead to an
+        # inf in the pdf (density) calculation.
+        optimizer.reference[["15N_ref", "1H_ref", "I_ref"]] += \
+            np.array([[0.1, 0.2, 0.3]]).T
+
+        actual_negLL = optimizer.fitness(params)[0]
+        expected_negLL = 787802420676.886
+        self.assertAlmostEqual(actual_negLL, expected_negLL, places=3)
+
     def test_observed_chemical_shift(self):
         optimizer = _test_object()
 
@@ -56,26 +91,12 @@ class TestOptimizer(TestCase):
         hydrogen_ref = pd.Series([10, 20, 30])
         hydrogen = pd.Series([60, 50, 40])
 
-        actual_shift = optimizer.observed_chemical_shift(nitrogen_ref, 
+        actual_shift = optimizer.observed_chemical_shift(nitrogen_ref,
                                                          nitrogen,
-                                                         hydrogen_ref, 
+                                                         hydrogen_ref,
                                                          hydrogen)
         expected_shift = pd.Series([538.5164807134504, 323.10988842807024, 107.70329614269008])
-        assert_series_equal(actual_shift, expected_shift, check_dtype=False)
-
-    def test_refpeak_optimization_fitness(self):
-        params = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9])
-        l1_model = np.array([10, 11, 12, 13, 14, 15, 16, 17, 18])
-
-        optimizer = _test_object()
-        optimizer.l1_model = l1_model
-        optimizer.lam = 0.
-        optimizer.mode = "reference_optimization"
-        optimizer.cs_dist="rayleigh"
-
-        actual_negLL = optimizer.fitness(params)[0]
-        expected_negLL = 203403594105.92865
-        self.assertAlmostEqual(actual_negLL, expected_negLL, places=3)
+        assert_series_equal(actual_shift, expected_shift, check_dtype=False)   
 
     def test_regularization_penalty(self):
         vector = np.array([5, -6, 10])
