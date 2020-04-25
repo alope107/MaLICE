@@ -4,10 +4,8 @@ import scipy.stats as stats
 from malice.optimizer import MaliceOptimizer
 
 
-def walk(optimizer, steps, confidence, min_global, max_global, seed,
+def walk(optimizer, steps, confidence, min_global, max_global,
          iterator=1, abort_threshold=100):
-
-    np.random.seed(seed=9*seed + 89*iterator)
 
     walker = MaliceOptimizer(larmor=optimizer.larmor,
                              gvs=optimizer.gvs,

@@ -15,6 +15,7 @@ import scipy.stats as stats
 from scipy.optimize import minimize
 
 from malice.resources import fonts
+from malice.seeds import get_base_seed
 
 
 def truncate_colormap(cmap, minval=0.0, maxval=1.0, n=256):
@@ -344,7 +345,7 @@ def set_font_dir():
      font_dir = pathlib.Path(fonts.__file__).parent.absolute()
      fpdf.FPDF_FONT_DIR = font_dir
 
-def CompLEx_Report(optimizer, config, performance, lam, seed, image_dir):
+def CompLEx_Report(optimizer, config, performance, lam, image_dir):
     pdf = CompLEx_PDF(orientation='portrait', unit='in', format='letter')
     pdf.set_margins(0.5,0.5,0.5)
     set_font_dir()
@@ -406,7 +407,7 @@ def CompLEx_Report(optimizer, config, performance, lam, seed, image_dir):
                        ('Population size', config.pop_size),
                        ('MCMC walks', config.mcmc_walks),
                        ('MCMC steps', config.mcmc_steps),
-                       ('Founder seed', seed),
+                       ('Founder seed', get_base_seed()),
                        ('PyGMO tolerance', format(config.tolerance, '.1g')),
                        ('Least squares max iterations', format(config.least_squares_max_iter,'.1g'))]
     pdf.set_font(fixed_width,'BI',12)

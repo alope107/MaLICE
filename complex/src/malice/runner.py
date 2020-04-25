@@ -11,9 +11,11 @@ from scipy.optimize import minimize
 import scipy.stats as stats
 
 from malice import mcmc
+from malice.args import parse_args
 from malice.optimizer import MaliceOptimizer
 from malice.output import create_output_files, make_output_dir
-from malice.args import parse_args
+from malice.seeds import set_base_seed
+
 
 
 def gen_pop1(optimizer):
@@ -50,19 +52,18 @@ def gen_pop2(optimizer):
     return N_random + H_random + Iref_random
 
 
-def pygmo_wrapper(optimizer, pop_generator, seed, islands, pop_size,
+def pygmo_wrapper(optimizer, pop_generator, islands, pop_size,
                   generations, evo_rounds, tolerance):
     archi = pg.archipelago(prob=pg.problem(optimizer),
                            s_pol=pg.select_best(0.10),
                            r_pol=pg.fair_replace(0.05),
-                           t=pg.fully_connected(),
-                           seed=seed)
+                           t=pg.fully_connected())
     archi.set_migration_type(pg.migration_type.broadcast)
     for iteration in range(islands):
         pop = pg.population(pg.problem(optimizer))
         for _ in range(pop_size):
             pop.push_back(pop_generator(optimizer))
-        archi.push_back(pop=pop, algo=pg.sade(gen=generations, variant=6, variant_adptv=2, ftol=tolerance, xtol=tolerance, seed=seed+10*(iteration+1)))
+        archi.push_back(pop=pop, algo=pg.sade(gen=generations, variant=6, variant_adptv=2, ftol=tolerance, xtol=tolerance))
     archi.evolve(evo_rounds)
     archi.wait()
     best_score = np.array(archi.get_champions_f()).min()
@@ -80,7 +81,7 @@ def csp_trajectory(theta, data_points, nh_scale):
 def main():
     args = parse_args()
     make_output_dir(args.output_dir)
-    np.random.seed(seed=args.seed)
+    set_base_seed(args.seed)
     run_malice(args)
 
 
@@ -116,9 +117,6 @@ def run_malice(config):
     lam = 0.015
     nh_scale = 0.2  # Consider reducing to ~0.14
 
-    pygmo_seed = 2*config.seed - 280
-    pg.set_global_rng_seed(seed=pygmo_seed)
-
     user_data, initial_reference, residues = parse_input(config.input_file)
 
     i_noise_est = np.mean(user_data.intensity)/10
@@ -140,7 +138,6 @@ def run_malice(config):
 
     optimizer.l1_model, performance['l1_model_score'] = pygmo_wrapper(optimizer,
                                                                       pop_generator=gen_pop1,
-                                                                      seed=pygmo_seed+987,
                                                                       islands=config.phase1_islands,
                                                                       pop_size=config.pop_size,
                                                                       generations=config.phase1_generations,
@@ -179,7 +176,6 @@ def run_malice(config):
 
     opt_ref, performance['opt_ref_score'] = pygmo_wrapper(optimizer,
                                                           pop_generator=gen_pop2,
-                                                          seed=pygmo_seed-1987,
                                                           islands=config.phase2_islands,
                                                           pop_size=config.pop_size,
                                                           generations=config.phase2_generations,
@@ -300,7 +296,7 @@ def run_malice(config):
     upper_conf_limits = []
 
     executor = concurrent.futures.ProcessPoolExecutor(config.num_threads)
-    futures = [executor.submit(mcmc.walk, optimizer, config.mcmc_steps, config.confidence, l1_bounds_min, l1_bounds_max, config.seed, k) for k in range(config.mcmc_walks)]
+    futures = [executor.submit(mcmc.walk, optimizer, config.mcmc_steps, config.confidence, l1_bounds_min, l1_bounds_max, k) for k in range(config.mcmc_walks)]
     concurrent.futures.wait(futures)
 
     accepted_steps = []
@@ -354,7 +350,7 @@ def run_malice(config):
     print('\n---  Phase 6: Output file generation  ---\n')
 
     create_output_files(optimizer, config.confidence, gvs, residues, fname_prefix,
-                        config.output_dir, config, lam, pygmo_seed, performance, fit_points)
+                        config.output_dir, config, lam,  performance, fit_points)
 
     performance['current_time'] = time.time() - performance['start_time']
     print('\n\tFinal run time = '+str(datetime.timedelta(seconds=performance['current_time'])).split('.')[0])
