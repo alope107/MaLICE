@@ -11,8 +11,7 @@ def make_output_dir(directory):
 
 
 def create_output_files(optimizer, confidence, gvs, residues, fname_prefix,
-                        output_dir, config, lam, pygmo_seed, performance,
-                        fit_points):
+                        output_dir, config, lam, performance, fit_points):
     # Generate a CSV with confidence intervals for all of the delta_w's and
     # trajectories if available
     alpha = 100.0*(1-confidence)/2
@@ -41,6 +40,6 @@ def create_output_files(optimizer, confidence, gvs, residues, fname_prefix,
     make_output_dir(image_dir)
 
     # Generate summary PDF
-    summary_pdf = CompLEx_Report(optimizer, config, performance, lam, pygmo_seed, image_dir)
+    summary_pdf = CompLEx_Report(optimizer, config, performance, lam, image_dir)
     summary_pdf_name = os.path.join(output_dir, fname_prefix + '_CompLEx_summary.pdf')
     summary_pdf.output(summary_pdf_name)

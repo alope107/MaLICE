@@ -67,8 +67,8 @@ def parse_args():
                         default=10)
     parser.add_argument('--seed',
                         type=int,
-                        help='initial seed for PyGMO (not deterministic, but gets closer)',
-                        default=1337)
+                        help='random seed (still not deterministic if using multiple threads)',
+                        default=None)
     parser.add_argument('--tolerance',
                         type=float,
                         help='PyGMO tolerance for both ftol and xtol',
