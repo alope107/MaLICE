@@ -26,45 +26,66 @@ def _test_object():
                            nh_scale=0.2,
                            lam=0.015)
 
+# Returns an array of global variables and dw that has
+# been somewhat fit to the test residues. Useful for
+# creating tests in somewhat reasonable parameter spaces.
+def _prefit_model():
+    return np.array([2.97, 3.52, 13.97, 27574071.42, 97798.68,
+                     0.63, 40.79, 30.02, 77.49])
+
+# Returns an array of global variables and dw that has
+# been somewhat fit to the test residues. Slight differences
+# from _prefit_model to faciliate testing where multiple
+# models are needed for input.
+def _prefit_model_2():
+    return np.array([3.21, 3.69, 13.37, 27574088.88, 97772.34,
+                     0.57, 43.21, 32.42, 79.18])
+
+# Returns an array of reference peaks that has been somewhat
+# fit to the test residues. 
+def _prefit_refpeaks():
+    return np.array([124.57 , 126.76, 121.13, 7.76, 8.35, 8.20,
+                     3406563.67, 4993584.45, 2168720.03])
+
 class TestOptimizer(TestCase):
 
     def test_set_bounds(self):
         optimizer = _test_object()
         bounds = ([1, 2, 3], [4, 5, 6])
         optimizer.set_bounds(bounds)
-        self.assertEqual(bounds,optimizer.get_bounds())
+        self.assertEqual(bounds, optimizer.get_bounds())
 
     def test_ml_optimization_fitness(self):
-        params = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9])
+        params = _prefit_model()
 
         optimizer = _test_object()
         optimizer.mode = "ml_optimization"
 
         actual_negLL = optimizer.fitness(params)[0]
-        expected_negLL = 787800164113.927
+        expected_negLL = 82.13685858503707
 
         self.assertAlmostEqual(actual_negLL, expected_negLL, places=3)
 
     def test_refpeak_optimization_fitness(self):
-        params = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9])
-        l1_model = np.array([10, 11, 12, 13, 14, 15, 16, 17, 18])
+        params = _prefit_refpeaks()
 
         optimizer = _test_object()
-        optimizer.l1_model = l1_model
+        optimizer.l1_model = _prefit_model()
         optimizer.lam = 0.
         optimizer.mode = "reference_optimization"
         optimizer.cs_dist = "rayleigh"
 
         actual_negLL = optimizer.fitness(params)[0]
-        expected_negLL = 203403594105.92865
+        expected_negLL = 86.24555893739519
         self.assertAlmostEqual(actual_negLL, expected_negLL, places=3)
 
     def test_dw_scale_optimization_fitness(self):
-        params = np.array([1, 2, 3, 4, 5, 6, 2, 7, 8, 9])
-        l1_model = np.array([10, 11, 12, 13, 14, 15, 6, 7, 8])
+        model = _prefit_model()
+        model_with_dw = np.insert(model, 7, .9)
+        params = model_with_dw
 
         optimizer = _test_object()
-        optimizer.l1_model = l1_model
+        optimizer.l1_model = _prefit_model_2()
         optimizer.lam = 0.
         optimizer.mode = "dw_scale_optimization"
         optimizer.cs_dist = "rayleigh"
@@ -77,7 +98,7 @@ class TestOptimizer(TestCase):
             np.array([[0.1, 0.2, 0.3]]).T
 
         actual_negLL = optimizer.fitness(params)[0]
-        expected_negLL = 787802420676.886
+        expected_negLL = 84534.24770801092
         self.assertAlmostEqual(actual_negLL, expected_negLL, places=3)
 
     def test_observed_chemical_shift(self):
