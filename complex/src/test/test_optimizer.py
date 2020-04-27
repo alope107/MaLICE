@@ -4,6 +4,7 @@ from unittest import TestCase
 import pandas as pd
 from pandas.testing import assert_series_equal, assert_frame_equal
 import numpy as np
+from numpy.testing import assert_allclose
 
 from malice.optimizer import MaliceOptimizer, regularization_penalty
 
@@ -127,6 +128,28 @@ class TestOptimizer(TestCase):
             'visible': {0: 150.0, 1: 150.0, 2: 150.0, 3: 150.0, 4: 150.0, 5: 150.0}})
 
         assert_frame_equal(actual_df, expected_df, check_like=True)
+
+    def test_lfitter(self):
+        params = _prefit_model()
+        
+        optimizer = _test_object()
+        optimizer.ml_model = _prefit_model_2()
+        optimizer.lam = 0.
+        optimizer.mode = "lfitter"
+        optimizer.cs_dist = "rayleigh"
+
+        optimizer.reference[["15N_ref", "1H_ref", "I_ref"]] += \
+            np.array([[0.1, 0.2, 0.3]]).T
+
+        df = optimizer.fitness(params)
+        actual_row = df.loc[[2999]].squeeze()
+        # Perform spot-check on a single row.
+        # TODO(auberon): Switch to less brittle test once fitness function refactored.
+        expected_row = pd.Series([8.69, 150.0, 9, 121.424, 8.502, 2062229.3, 77.49, 2043052, 0.001234],
+                                 ['titrant', 'visible', 'residue', '15N_ref', '1H_ref', 'I_ref', 'dw',
+       'ifit', 'csfit'])
+
+        assert_series_equal(actual_row, expected_row, check_less_precise=True, check_names=False)
 
     def test_observed_chemical_shift(self):
         optimizer = _test_object()
