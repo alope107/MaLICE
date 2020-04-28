@@ -25,15 +25,3 @@ CMD ["data/minidev.csv",                \
      "--mcmc_walks", "10",             \ 
      "--mcmc_steps", "20",             \ 
      "--s3_prefix", "malice/test"]
-
-# CMD ["data/dev.csv",                    \
-#      "--pop_size", "5",                 \
-#      "--pop_iter", "1",                 \
-#      "--evo_max_iter", "10",            \
-#      "--least_squares_max_iter", "1",   \
-#      "--thread_count", "1",             \
-#      "--bootstraps", "2",               \
-#      "--s3_prefix", "malice/test",      \
-#      "--output_dir", "default",         \
-#      "--deterministic"]
-

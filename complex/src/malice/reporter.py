@@ -434,7 +434,7 @@ def CompLEx_Report(optimizer, config, performance, lam, image_dir):
                         ('L1 optimization runtime', str(datetime.timedelta(seconds=performance['phase1_time'])).split('.')[0]),
                         ('Reference optimization runtime', str(datetime.timedelta(seconds=performance['phase2_time'])).split('.')[0]),
                         ('ML optimization runtime', str(datetime.timedelta(seconds=performance['phase3_time'])).split('.')[0]),
-                        ('Bootstrapping runtime', str(datetime.timedelta(seconds=performance['phase4_time'])).split('.')[0]),
+                        ('MCMC runtime', str(datetime.timedelta(seconds=performance['phase4_time'])).split('.')[0]),
                         ('Total runtime', str(datetime.timedelta(seconds=performance['current_time'])).split('.')[0]))
     
     for name, var in performance_text:
