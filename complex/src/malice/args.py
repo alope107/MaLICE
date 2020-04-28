@@ -49,10 +49,6 @@ def parse_args():
                         type=int,
                         help='Maximum number of iterations to run sequential least squares minimization',
                         default=100000)
-    parser.add_argument('--bootstrap_generations',
-                        type=int,
-                        help='PyGMO number of generations per bootstrap',
-                        default=3000)
     parser.add_argument('--mcmc_walks',
                         type=int,
                         help='Number of MCMC walks to perform for confidence interval calculation',

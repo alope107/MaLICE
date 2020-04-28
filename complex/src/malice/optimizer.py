@@ -17,8 +17,7 @@ class MaliceOptimizer(object):
 
     def __init__(self, larmor=500, gvs=6, lam=0.0, cs_dist='gaussian',
                  nh_scale=0.2, data=None, mode=None, l1_model=None, 
-                 ml_model=None, reference=None,
-                 bootstrap=False):
+                 ml_model=None, reference=None):
         self.larmor = larmor
         self.gvs = gvs
         self.lam = lam
@@ -29,7 +28,6 @@ class MaliceOptimizer(object):
         self.l1_model = l1_model
         self.ml_model = ml_model
         self.reference = reference
-        self.bootstrap = bootstrap
 
         self.residues = list(self.data.groupby('residue').groups.keys())
 
@@ -202,9 +200,6 @@ class MaliceOptimizer(object):
 
 
         df = merged_residue_df(self.data, residue_params)
-
-        if self.bootstrap:
-            df = df.sample(frac=1, replace=True)
 
         cshat, ihat = self.compute_fits(Kd_exp, koff_exp, dR2, amp_scaler, df)
         csobs = self.observed_chemical_shift(df['15N_ref'], df['15N'], df['1H_ref'], df['1H'])
