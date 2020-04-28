@@ -31,6 +31,11 @@ def create_output_files(optimizer, confidence, gvs, residues, fname_prefix,
     deltaw_df.to_csv(csv_name, index=False)
     deltaw_df[['residue', 'delta_w']].to_csv(txt_name, index=False, header=False)
 
+    
+    # Put columns in desired order for output
+    fit_points = fit_points[["residue", "15N", "1H", "intensity", "titrant", "visible", 
+                            "15N_ref", "1H_ref", "I_ref", "dw", "csp", "ifit", "csfit"]]
+
     # Record the fit points to a file
     fit_points_name = os.path.join(output_dir, fname_prefix+'_CompLEx_fit_points.csv')
     fit_points.to_csv(fit_points_name, index=False)

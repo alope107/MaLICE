@@ -323,7 +323,7 @@ def run_malice(config):
     print('\n---  Phase 5: CSP trajectory inference  ---\n')
 
     optimizer.mode = 'pfitter'
-    fit_points = optimizer.not_fitness()
+    fit_points = optimizer.enhanced_df()
 
     thetas = []
     theta_F_stats = []

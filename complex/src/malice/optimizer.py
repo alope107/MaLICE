@@ -42,25 +42,6 @@ class MaliceOptimizer(object):
                                                             '15N': '15N_ref',
                                                             '1H': '1H_ref'})
 
-    # Computes a dataframe based on the final "ml_model".
-    # Contains observed data, fit reference peaks and fit dw.
-    # TODO(auberon): Expose this in a better way
-    # def final_residue_df(self):
-    #     if self.ml_model is None:
-    #         raise AttributeError("Final residue dataframe cannot " + \ 
-    #                              "constructed before ml_model is fit.")
-    #     residue_params = self.reference.copy()
-    #     residue_params['dw'] = self.ml_model[self.gvs:]
-    #     df = merged_residue_df(self.data, residue_params)
-
-    #     cshat, ihat = self.compute_fits(Kd_exp, koff_exp, dR2, amp_scaler, df)
-    #     cs_obs = self.observed_chemical_shift(df['15N_ref'], df['15N'], df['1H_ref'], df['1H'])
-
-    #     df['csp'] = csobs/self.larmor  # Returns as ppm and not Hz
-    #     df['ifit'] = ihat
-    #     df['csfit'] = cshat/self.larmor  # Return as ppm and not Hz
-    #     return df
-
     def delta_ws(self):
         if self.ml_model is None:
             return None
@@ -117,7 +98,8 @@ class MaliceOptimizer(object):
         shift = np.sqrt(np.square(n_diff_scaled) + np.square(h_diff))
         return self.larmor * shift
 
-    def not_fitness(self, params=None):
+    # Temporary name. Will be split into multiple functions.
+    def enhanced_df(self, params=None):
         if self.mode == 'pfitter':
             Kd_exp, koff_exp, dR2, amp_scaler, i_noise, cs_noise = self.ml_model[:self.gvs]
             residue_params = self.reference.copy()
