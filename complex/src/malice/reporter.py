@@ -532,9 +532,9 @@ def CompLEx_Report(optimizer, config, performance, lam, image_dir):
     
     ## End of page 1, now to add residue-specific stuff to subsequent pages
     optimizer.mode = 'pfitter'
-    fit_points = optimizer.fitness()
+    fit_points = optimizer.enhanced_df()
     optimizer.mode = 'lfitter'
-    regression = optimizer.fitness()
+    regression = optimizer.enhanced_df()
     
     #lower_cl_params = list(optimizer.ml_model[:optimizer.gvs]) + list(optimizer.lower_conf_limits[optimizer.gvs:])
     #lower_cl_regression = optimizer.fitness(lower_cl_params)
@@ -543,16 +543,16 @@ def CompLEx_Report(optimizer, config, performance, lam, image_dir):
     
     lower_cl_csp_params = [optimizer.upper_conf_limits[0]] + list(optimizer.lower_conf_limits[1:])
     lower_cl_int_params = list(optimizer.upper_conf_limits[:2]) + [optimizer.lower_conf_limits[2], optimizer.upper_conf_limits[3]] + list(optimizer.lower_conf_limits[4:])
-    lower_cl_csp_regression = optimizer.fitness(lower_cl_csp_params)
-    lower_cl_int_regression = optimizer.fitness(lower_cl_int_params)
+    lower_cl_csp_regression = optimizer.enhanced_df(lower_cl_csp_params)
+    lower_cl_int_regression = optimizer.enhanced_df(lower_cl_int_params)
     
     upper_cl_csp_params = [optimizer.lower_conf_limits[0]] + list(optimizer.upper_conf_limits[1:])
     upper_cl_int_params = list(optimizer.lower_conf_limits[:2]) + [optimizer.upper_conf_limits[2], optimizer.lower_conf_limits[3]] + list(optimizer.upper_conf_limits[4:])
-    upper_cl_csp_regression = optimizer.fitness(upper_cl_csp_params)
-    upper_cl_int_regression = optimizer.fitness(upper_cl_int_params)
+    upper_cl_csp_regression = optimizer.enhanced_df(upper_cl_csp_params)
+    upper_cl_int_regression = optimizer.enhanced_df(upper_cl_int_params)
     
     optimizer.mode = 'simulated_peak_generation'
-    regression_at_titrant_concs = optimizer.fitness()
+    regression_at_titrant_concs = optimizer.enhanced_df()
     
     ## Set up the color scheme for plotting over titrant range
     titrant_concs = list(fit_points.titrant.unique())

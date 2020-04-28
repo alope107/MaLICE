@@ -9,6 +9,9 @@ import scipy.stats as stats
 def regularization_penalty(lam, vector):
     return lam * np.linalg.norm(vector, 1)
 
+def merged_residue_df(observed_df, reference_df):
+    return pd.merge(observed_df, reference_df, on='residue')
+
 
 class MaliceOptimizer(object):
 
@@ -95,29 +98,14 @@ class MaliceOptimizer(object):
         shift = np.sqrt(np.square(n_diff_scaled) + np.square(h_diff))
         return self.larmor * shift
 
-    def fitness(self, params=None):
-        if self.mode == 'ml_optimization':
-            Kd_exp, koff_exp, dR2, amp_scaler, i_noise, cs_noise = params[:self.gvs]
-            residue_params = self.reference.copy()
-            residue_params['dw'] = params[self.gvs:]
-
-        elif self.mode == 'reference_optimization':
-            Kd_exp, koff_exp, dR2, amp_scaler, i_noise, cs_noise = self.l1_model[:self.gvs]
-            residue_params = pd.DataFrame({'residue': self.residues,
-                                           '15N_ref': params[:int(len(params)/3)],
-                                           '1H_ref': params[int(len(params)/3):2*int(len(params)/3)],
-                                           'I_ref': params[2*int(len(params)/3):],
-                                           'dw': self.l1_model[self.gvs:]})
-
-        elif self.mode == 'dw_scale_optimization':
-            Kd_exp, koff_exp, dR2, amp_scaler, i_noise, cs_noise, scale = params[:self.gvs+1]
-            residue_params = self.reference.copy()
-            residue_params['dw'] = self.l1_model[self.gvs:]*scale
-
-        elif self.mode == 'pfitter':
+    # Temporary name. Will be split into multiple functions.
+    def enhanced_df(self, params=None):
+        if self.mode == 'pfitter':
             Kd_exp, koff_exp, dR2, amp_scaler, i_noise, cs_noise = self.ml_model[:self.gvs]
             residue_params = self.reference.copy()
             residue_params['dw'] = self.ml_model[self.gvs:]
+
+            df = merged_residue_df(self.data, residue_params)
 
         elif self.mode in ['lfitter', 'simulated_peak_generation']:
             if params is None:
@@ -170,31 +158,49 @@ class MaliceOptimizer(object):
             residue_params = self.reference.copy()
             residue_params['dw'] = params[self.gvs:]
 
+            df = merged_residue_df(fitter_input, residue_params)
+
+        cshat, ihat = self.compute_fits(Kd_exp, koff_exp, dR2, amp_scaler, df)
+
+        df['ifit'] = ihat
+        df['csfit'] = cshat/self.larmor  # Return as ppm and not Hz
+
+        if self.mode != "lfitter":
+            csobs = self.observed_chemical_shift(df['15N_ref'], df['15N'], df['1H_ref'], df['1H'])
+            df['csp'] = csobs/self.larmor  # Returns as ppm and not Hz
+        
+        return df
+
+    def fitness(self, params=None):
+        if self.mode == 'ml_optimization':
+            Kd_exp, koff_exp, dR2, amp_scaler, i_noise, cs_noise = params[:self.gvs]
+            residue_params = self.reference.copy()
+            residue_params['dw'] = params[self.gvs:]
+
+        elif self.mode == 'reference_optimization':
+            Kd_exp, koff_exp, dR2, amp_scaler, i_noise, cs_noise = self.l1_model[:self.gvs]
+            residue_params = pd.DataFrame({'residue': self.residues,
+                                           '15N_ref': params[:int(len(params)/3)],
+                                           '1H_ref': params[int(len(params)/3):2*int(len(params)/3)],
+                                           'I_ref': params[2*int(len(params)/3):],
+                                           'dw': self.l1_model[self.gvs:]})
+
+        elif self.mode == 'dw_scale_optimization':
+            Kd_exp, koff_exp, dR2, amp_scaler, i_noise, cs_noise, scale = params[:self.gvs+1]
+            residue_params = self.reference.copy()
+            residue_params['dw'] = self.l1_model[self.gvs:]*scale
+
         else:
             raise NotImplementedError("Unsupported optimization mode " + str(self.mode))
 
-        if self.mode in ['lfitter', 'simulated_peak_generation']:
-            df = pd.merge(fitter_input, residue_params, on='residue')
-        else:
-            df = pd.merge(self.data, residue_params, on='residue')
+
+        df = merged_residue_df(self.data, residue_params)
 
         if self.bootstrap:
             df = df.sample(frac=1, replace=True)
 
         cshat, ihat = self.compute_fits(Kd_exp, koff_exp, dR2, amp_scaler, df)
-
-        if self.mode == 'lfitter':
-            df['ifit'] = ihat
-            df['csfit'] = cshat/self.larmor  # Return as ppm and not Hz
-            return df
-
         csobs = self.observed_chemical_shift(df['15N_ref'], df['15N'], df['1H_ref'], df['1H'])
-
-        if self.mode in ['pfitter', 'simulated_peak_generation']:
-            df['csp'] = csobs/self.larmor  # Returns as ppm and not Hz
-            df['ifit'] = ihat
-            df['csfit'] = cshat/self.larmor  # Return as ppm and not Hz
-            return df
 
         # Compute the likelihoods
         logLL_int = np.sum(stats.norm.logpdf(df.intensity, loc=ihat, scale=i_noise))

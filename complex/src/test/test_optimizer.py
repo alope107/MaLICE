@@ -112,7 +112,7 @@ class TestOptimizer(TestCase):
         optimizer.reference[["15N_ref", "1H_ref", "I_ref"]] += \
             np.array([[0.1, 0.2, 0.3]]).T
 
-        actual_df = optimizer.fitness()
+        actual_df = optimizer.enhanced_df()
         # TODO(auberon): Switch to less brittle test once fitness function refactored.
         expected_df = pd.DataFrame({
             '15N': {0: 124.56700000000001, 1: 124.565, 2: 126.77600000000001, 3: 126.777, 4: 121.124, 5: 121.125}, 
@@ -141,7 +141,7 @@ class TestOptimizer(TestCase):
         optimizer.reference[["15N_ref", "1H_ref", "I_ref"]] += \
             np.array([[0.1, 0.2, 0.3]]).T
 
-        df = optimizer.fitness(params)
+        df = optimizer.enhanced_df(params)
         actual_row = df.loc[[2999]].squeeze()
         # Perform spot-check on a single row.
         # TODO(auberon): Switch to less brittle test once fitness function refactored.
@@ -161,7 +161,7 @@ class TestOptimizer(TestCase):
         optimizer.reference[["15N_ref", "1H_ref", "I_ref"]] += \
             np.array([[0.1, 0.2, 0.3]]).T
 
-        actual_df = optimizer.fitness()
+        actual_df = optimizer.enhanced_df()
         # TODO(auberon): Switch to less brittle test once fitness function refactored.
         expected_df = pd.DataFrame({'15N': {0: 124.56700000000001, 1: 124.565, 2: 126.77600000000001, 3: 126.777, 4: 121.124, 5: 121.125},
                                     '15N_ref': {0: 124.667, 1: 124.667, 2: 126.97600000000001, 3: 126.97600000000001, 4: 121.42399999999999, 5: 121.42399999999999},
