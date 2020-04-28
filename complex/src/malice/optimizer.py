@@ -98,6 +98,15 @@ class MaliceOptimizer(object):
         shift = np.sqrt(np.square(n_diff_scaled) + np.square(h_diff))
         return self.larmor * shift
 
+    def add_fits_to_df(self, Kd_exp, koff_exp, dR2, amp_scaler, df):
+        cshat, ihat = self.compute_fits(Kd_exp, koff_exp, dR2, amp_scaler, df)
+        df['ifit'] = ihat
+        df['csfit'] = cshat/self.larmor  # Return as ppm and not Hz
+
+    def add_observed_to_df(self, df):
+        csobs = self.observed_chemical_shift(df['15N_ref'], df['15N'], df['1H_ref'], df['1H'])
+        df['csp'] = csobs/self.larmor  # Returns as ppm and not Hz
+
     # Temporary name. Will be split into multiple functions.
     def enhanced_df(self, params=None):
         if self.mode == 'pfitter':
@@ -160,14 +169,10 @@ class MaliceOptimizer(object):
 
             df = merged_residue_df(fitter_input, residue_params)
 
-        cshat, ihat = self.compute_fits(Kd_exp, koff_exp, dR2, amp_scaler, df)
-
-        df['ifit'] = ihat
-        df['csfit'] = cshat/self.larmor  # Return as ppm and not Hz
+        self.add_fits_to_df(Kd_exp, koff_exp, dR2, amp_scaler, df)
 
         if self.mode != "lfitter":
-            csobs = self.observed_chemical_shift(df['15N_ref'], df['15N'], df['1H_ref'], df['1H'])
-            df['csp'] = csobs/self.larmor  # Returns as ppm and not Hz
+            self.add_observed_to_df(df)
         
         return df
 
