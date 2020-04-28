@@ -531,8 +531,7 @@ def CompLEx_Report(optimizer, config, performance, lam, image_dir):
               w = 7.5, h = 4.5)
     
     ## End of page 1, now to add residue-specific stuff to subsequent pages
-    optimizer.mode = 'pfitter'
-    fit_points = optimizer.enhanced_df()
+    fit_points = optimizer.pfitter()
     optimizer.mode = 'lfitter'
     regression = optimizer.enhanced_df()
     

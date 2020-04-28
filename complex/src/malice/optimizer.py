@@ -98,76 +98,83 @@ class MaliceOptimizer(object):
         shift = np.sqrt(np.square(n_diff_scaled) + np.square(h_diff))
         return self.larmor * shift
 
-    # Temporary name. Will be split into multiple functions.
-    def enhanced_df(self, params=None):
-        if self.mode == 'pfitter':
-            Kd_exp, koff_exp, dR2, amp_scaler, i_noise, cs_noise = self.ml_model[:self.gvs]
-            residue_params = self.reference.copy()
-            residue_params['dw'] = self.ml_model[self.gvs:]
-
-            df = merged_residue_df(self.data, residue_params)
-
-        elif self.mode in ['lfitter', 'simulated_peak_generation']:
-            if params is None:
-                params = list(self.ml_model)
-
-            # Output the per-residue fits
-            Kd_exp, koff_exp, dR2, amp_scaler, i_noise, cs_noise = params[:self.gvs]
-
-            concs = self.data[['titrant', 'visible']].drop_duplicates()
-            titrant_visible_lm = stats.linregress(concs.titrant, concs.visible)
-
-            if self.mode == 'lfitter':
-                titrant_rng = np.max(concs.titrant) - np.min(concs.titrant)
-                titrant_vals = np.linspace(np.min(concs.titrant)-0.1*titrant_rng,
-                                           np.max(concs.titrant)+0.1*titrant_rng,
-                                           1000)
-                visible_vals = titrant_visible_lm.slope*titrant_vals + titrant_visible_lm.intercept
-                fitter_input = pd.DataFrame({'titrant': titrant_vals,
-                                             'visible': visible_vals})
-                res_df = pd.DataFrame(itertools.product(titrant_vals, self.residues),
-                                      columns=['titrant', 'residue'])
-                fitter_input = pd.merge(fitter_input, res_df, on='titrant')
-
-            elif self.mode == 'simulated_peak_generation':
-                titrant_vals = concs.titrant.unique()
-                visible_vals = titrant_visible_lm.slope*titrant_vals + titrant_visible_lm.intercept
-                fitter_input = pd.DataFrame({'titrant': titrant_vals,
-                                             'visible': visible_vals})
-                res_df = pd.DataFrame(itertools.product(titrant_vals, self.residues),
-                                      columns=['titrant', 'residue'])
-                pts_15N = []
-                pts_1H = []
-                pts_int = []
-                for i in range(len(res_df)):
-                    focal_data = self.data[(self.data.residue == res_df.residue[i]) &
-                                           (self.data.titrant == res_df.titrant[i])]
-                    if len(focal_data) >= 1:
-                        pts_15N.append(float(focal_data['15N'].mean()))
-                        pts_1H.append(float(focal_data['1H'].mean()))
-                        pts_int.append(float(focal_data['intensity'].mean()))
-                    else:
-                        pts_15N.append(np.nan)
-                        pts_1H.append(np.nan)
-                        pts_int.append(np.nan)
-                res_df['15N'] = pts_15N
-                res_df['1H'] = pts_1H
-                res_df['intensity'] = pts_int
-                fitter_input = pd.merge(fitter_input, res_df, on='titrant')
-
-            residue_params = self.reference.copy()
-            residue_params['dw'] = params[self.gvs:]
-
-            df = merged_residue_df(fitter_input, residue_params)
-
+    def add_fits_to_df(self, Kd_exp, koff_exp, dR2, amp_scaler, df):
         cshat, ihat = self.compute_fits(Kd_exp, koff_exp, dR2, amp_scaler, df)
-
         df['ifit'] = ihat
         df['csfit'] = cshat/self.larmor  # Return as ppm and not Hz
 
+    def add_observed_to_df(self, df):
+        csobs = self.observed_chemical_shift(df['15N_ref'], df['15N'], df['1H_ref'], df['1H'])
+        df['csp'] = csobs/self.larmor  # Returns as ppm and not Hz
+
+    def pfitter(self):
+        Kd_exp, koff_exp, dR2, amp_scaler = self.ml_model[:4]
+        residue_params = self.reference.copy()
+        residue_params['dw'] = self.ml_model[self.gvs:]
+        df = merged_residue_df(self.data, residue_params)
+
+        self.add_fits_to_df(Kd_exp, koff_exp, dR2, amp_scaler, df)
+        self.add_observed_to_df(df)
+        return df
+
+    # Temporary name. Will be split into multiple functions.
+    def enhanced_df(self, params=None):
+        if params is None:
+            params = list(self.ml_model)
+
+        # Output the per-residue fits
+        Kd_exp, koff_exp, dR2, amp_scaler = params[:4]
+
+        concs = self.data[['titrant', 'visible']].drop_duplicates()
+        titrant_visible_lm = stats.linregress(concs.titrant, concs.visible)
+
+        if self.mode == 'lfitter':
+            titrant_rng = np.max(concs.titrant) - np.min(concs.titrant)
+            titrant_vals = np.linspace(np.min(concs.titrant)-0.1*titrant_rng,
+                                        np.max(concs.titrant)+0.1*titrant_rng,
+                                        1000)
+            visible_vals = titrant_visible_lm.slope*titrant_vals + titrant_visible_lm.intercept
+            fitter_input = pd.DataFrame({'titrant': titrant_vals,
+                                            'visible': visible_vals})
+            res_df = pd.DataFrame(itertools.product(titrant_vals, self.residues),
+                                    columns=['titrant', 'residue'])
+            fitter_input = pd.merge(fitter_input, res_df, on='titrant')
+
+        elif self.mode == 'simulated_peak_generation':
+            titrant_vals = concs.titrant.unique()
+            visible_vals = titrant_visible_lm.slope*titrant_vals + titrant_visible_lm.intercept
+            fitter_input = pd.DataFrame({'titrant': titrant_vals,
+                                            'visible': visible_vals})
+            res_df = pd.DataFrame(itertools.product(titrant_vals, self.residues),
+                                    columns=['titrant', 'residue'])
+            pts_15N = []
+            pts_1H = []
+            pts_int = []
+            for i in range(len(res_df)):
+                focal_data = self.data[(self.data.residue == res_df.residue[i]) &
+                                        (self.data.titrant == res_df.titrant[i])]
+                if len(focal_data) >= 1:
+                    pts_15N.append(float(focal_data['15N'].mean()))
+                    pts_1H.append(float(focal_data['1H'].mean()))
+                    pts_int.append(float(focal_data['intensity'].mean()))
+                else:
+                    pts_15N.append(np.nan)
+                    pts_1H.append(np.nan)
+                    pts_int.append(np.nan)
+            res_df['15N'] = pts_15N
+            res_df['1H'] = pts_1H
+            res_df['intensity'] = pts_int
+            fitter_input = pd.merge(fitter_input, res_df, on='titrant')
+
+        residue_params = self.reference.copy()
+        residue_params['dw'] = params[self.gvs:]
+
+        df = merged_residue_df(fitter_input, residue_params)
+
+        self.add_fits_to_df(Kd_exp, koff_exp, dR2, amp_scaler, df)
+
         if self.mode != "lfitter":
-            csobs = self.observed_chemical_shift(df['15N_ref'], df['15N'], df['1H_ref'], df['1H'])
-            df['csp'] = csobs/self.larmor  # Returns as ppm and not Hz
+            self.add_observed_to_df(df)
         
         return df
 

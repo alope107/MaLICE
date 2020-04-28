@@ -105,14 +105,11 @@ class TestOptimizer(TestCase):
     def test_pfitter(self):
         optimizer = _test_object()
         optimizer.ml_model = _prefit_model()
-        optimizer.lam = 0.
-        optimizer.mode = "pfitter"
-        optimizer.cs_dist = "rayleigh"
 
         optimizer.reference[["15N_ref", "1H_ref", "I_ref"]] += \
             np.array([[0.1, 0.2, 0.3]]).T
 
-        actual_df = optimizer.enhanced_df()
+        actual_df = optimizer.pfitter()
         # TODO(auberon): Switch to less brittle test once fitness function refactored.
         expected_df = pd.DataFrame({
             '15N': {0: 124.56700000000001, 1: 124.565, 2: 126.77600000000001, 3: 126.777, 4: 121.124, 5: 121.125}, 
