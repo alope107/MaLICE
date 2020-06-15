@@ -238,7 +238,7 @@ def parse_input(fname, larmor, nh_scale):
                         dtype = {'residue':np.int64,'15N':np.float64,
                                  '1H':np.float64,'intensity':np.float64,
                                  'titrant':np.float64,'visible':np.float64})
-    data = input.copy()[input.intensity > 0]
+    data = input.copy().sort_values(by=['residue','titrant'])
     
     residues = list(data.groupby('residue').groups.keys())
     reference_points = pd.DataFrame()
