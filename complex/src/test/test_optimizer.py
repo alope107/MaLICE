@@ -99,7 +99,7 @@ class TestOptimizer(TestCase):
             np.array([[0.1, 0.2, 0.3]]).T
 
         actual_negLL = optimizer.fitness(params)[0]
-        expected_negLL = 84534.24770801092
+        expected_negLL = 84536.60752654714
         self.assertAlmostEqual(actual_negLL, expected_negLL, places=3)
 
     def test_pfitter(self):

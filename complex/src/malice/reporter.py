@@ -429,14 +429,14 @@ def CompLEx_Report(optimizer, config, performance, lam, image_dir):
     
     lower_cl_csp_params = [optimizer.upper_conf_limits[0]] + list(optimizer.lower_conf_limits[1:])
     lower_cl_int_params = list(optimizer.lower_conf_limits[:2]) + [optimizer.upper_conf_limits[2], optimizer.lower_conf_limits[3]] + list(optimizer.upper_conf_limits[4:])
-    lower_cl_csp_regression = optimizer.fitness(lower_cl_csp_params)
-    lower_cl_int_regression = optimizer.fitness(lower_cl_int_params)
+    lower_cl_csp_regression = optimizer.enhanced_df(lower_cl_csp_params)
+    lower_cl_int_regression = optimizer.enhanced_df(lower_cl_int_params)
     
     
     upper_cl_csp_params = [optimizer.lower_conf_limits[0]] + list(optimizer.upper_conf_limits[1:])
     upper_cl_int_params = list(optimizer.upper_conf_limits[:2]) + [optimizer.lower_conf_limits[2], optimizer.upper_conf_limits[3]] + list(optimizer.lower_conf_limits[4:])
-    upper_cl_csp_regression = optimizer.fitness(upper_cl_csp_params)
-    upper_cl_int_regression = optimizer.fitness(upper_cl_int_params)
+    upper_cl_csp_regression = optimizer.enhanced_df(upper_cl_csp_params)
+    upper_cl_int_regression = optimizer.enhanced_df(upper_cl_int_params)
     
     optimizer.mode = 'simulated_peak_generation'
     regression_at_titrant_concs = optimizer.enhanced_df()
