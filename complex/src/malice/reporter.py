@@ -1,15 +1,21 @@
-import os, sys, datetime
-import numpy as np, pandas as pd
-import scipy.stats as stats
-from scipy.optimize import minimize
+import datetime
+import os
+import pathlib
+import sys
+
+from fpdf import fpdf, FPDF
 from matplotlib import pyplot as plt
-from matplotlib.patches import Ellipse
 import matplotlib.cm as cm
 import matplotlib.colors as colors
-from fpdf import fpdf, FPDF
+from matplotlib.patches import Ellipse
 import nmrglue as ng
-import pathlib
+import numpy as np
+import pandas as pd
+import scipy.stats as stats
+from scipy.optimize import minimize
+
 from malice.resources import fonts
+from malice.seeds import get_base_seed
 
 
 def truncate_colormap(cmap, minval=0.0, maxval=1.0, n=256):
@@ -17,8 +23,6 @@ def truncate_colormap(cmap, minval=0.0, maxval=1.0, n=256):
         'trunc({n},{a:.2f},{b:.2f})'.format(n=cmap.name, a=minval, b=maxval),
         cmap(np.linspace(minval, maxval, n)))
     return new_cmap
-
-
 
 class CompLEx_PDF(FPDF):
  
@@ -35,7 +39,6 @@ class CompLEx_PDF(FPDF):
         # Add a page number
         page = 'Page ' + str(self.page_no())
         self.cell(0, 0, page, 0, 0, 'C')
-
 
 def generate_sim_spectrum(optimizer, fit_peaks, larmor, residue, titrant_concs, color_palette, background_palette, figure_path):
     # Sample sparky dictionary
@@ -65,7 +68,6 @@ def generate_sim_spectrum(optimizer, fit_peaks, larmor, residue, titrant_concs, 
     data = np.empty(shape ,dtype='float32')
     lineshapes = ('l','l')
     
-    
     # convert the peak list from PPM to points
     uc_15N = ng.sparky.make_uc(dic, None, 0)
     uc_1H = ng.sparky.make_uc(dic, None, 1)
@@ -78,7 +80,6 @@ def generate_sim_spectrum(optimizer, fit_peaks, larmor, residue, titrant_concs, 
     contour_factor = 1.2
     contour_levels = contour_start * contour_factor ** np.arange(contour_num)
     contour_linewidth = 0.2
-    
     
     
     #max_csp = float(max([fit_peaks.csp.max(), fit_peaks.csfit.max()]))
@@ -99,7 +100,6 @@ def generate_sim_spectrum(optimizer, fit_peaks, larmor, residue, titrant_concs, 
     ax.set_ylabel('$^{15}$N (ppm)', fontsize=8)
     ax.tick_params(labelsize=7)
     
-
     ## 200325 Want to change the way that I draw the peaks all together
     ## Instead of simulated peaks (which confuses everyone), now going to draw "real" spectra with linewidths
     ## just inferred from the user input data. But let's try drawing the entire titration series first using
@@ -237,7 +237,7 @@ def set_font_dir():
      font_dir = pathlib.Path(fonts.__file__).parent.absolute()
      fpdf.FPDF_FONT_DIR = font_dir
 
-def CompLEx_Report(optimizer, config, performance, lam, seed, image_dir):
+def CompLEx_Report(optimizer, config, performance, lam, image_dir):
     pdf = CompLEx_PDF(orientation='portrait', unit='in', format='letter')
     pdf.set_margins(0.5,0.5,0.5)
     set_font_dir()
@@ -299,7 +299,7 @@ def CompLEx_Report(optimizer, config, performance, lam, seed, image_dir):
                        ('Population size', config.pop_size),
                        ('MCMC walks', config.mcmc_walks),
                        ('MCMC steps', config.mcmc_steps),
-                       ('Founder seed', seed),
+                       ('Founder seed', get_base_seed()),
                        ('PyGMO tolerance', format(config.tolerance, '.1g')),
                        ('Least squares max iterations', format(config.least_squares_max_iter,'.1g'))]
     pdf.set_font(fixed_width,'BI',12)
@@ -326,7 +326,7 @@ def CompLEx_Report(optimizer, config, performance, lam, seed, image_dir):
                         ('L1 optimization runtime', str(datetime.timedelta(seconds=performance['phase1_time'])).split('.')[0]),
                         ('Reference optimization runtime', str(datetime.timedelta(seconds=performance['phase2_time'])).split('.')[0]),
                         ('ML optimization runtime', str(datetime.timedelta(seconds=performance['phase3_time'])).split('.')[0]),
-                        ('Bootstrapping runtime', str(datetime.timedelta(seconds=performance['phase4_time'])).split('.')[0]),
+                        ('MCMC runtime', str(datetime.timedelta(seconds=performance['phase4_time'])).split('.')[0]),
                         ('Total runtime', str(datetime.timedelta(seconds=performance['current_time'])).split('.')[0]))
     
     for name, var in performance_text:
@@ -337,9 +337,6 @@ def CompLEx_Report(optimizer, config, performance, lam, seed, image_dir):
         pdf.cell(0.5, 10/72, txt=var, ln=1, align='R')
     
     pdf.ln(0.1)
-    
-    
-    
     
     ## Insert table of global variable and estimates
     #width = 0.85
@@ -425,13 +422,10 @@ def CompLEx_Report(optimizer, config, performance, lam, seed, image_dir):
     pdf.image(os.path.join(image_dir,'deltaw_plot.jpg'), x = pdf.get_x(), y=pdf.get_y(),
               w = 7.5, h = 4.5)
     
-    
-    
     ## End of page 1, now to add residue-specific stuff to subsequent pages
-    optimizer.mode = 'pfitter'
-    fit_points = optimizer.fitness()
+    fit_points = optimizer.pfitter()
     optimizer.mode = 'lfitter'
-    regression = optimizer.fitness()
+    regression = optimizer.enhanced_df()
     
     lower_cl_csp_params = [optimizer.upper_conf_limits[0]] + list(optimizer.lower_conf_limits[1:])
     lower_cl_int_params = list(optimizer.lower_conf_limits[:2]) + [optimizer.upper_conf_limits[2], optimizer.lower_conf_limits[3]] + list(optimizer.upper_conf_limits[4:])
@@ -445,7 +439,7 @@ def CompLEx_Report(optimizer, config, performance, lam, seed, image_dir):
     upper_cl_int_regression = optimizer.fitness(upper_cl_int_params)
     
     optimizer.mode = 'simulated_peak_generation'
-    regression_at_titrant_concs = optimizer.fitness()
+    regression_at_titrant_concs = optimizer.enhanced_df()
     
     ## Set up the color scheme for plotting over titrant range
     titrant_concs = list(fit_points.titrant.unique())
@@ -610,23 +604,8 @@ def CompLEx_Report(optimizer, config, performance, lam, seed, image_dir):
         pdf.cell(0.47, 9/72, txt = format(float(residue_dw_df.loc[residue_dw_df.residue == residue, 'lower']),'.1f'), ln=0, align='C')
         pdf.cell(0.47, 9/72, txt = format(float(residue_dw_df.loc[residue_dw_df.residue == residue, 'upper']),'.1f'), ln=1, align='C')
         
-        
-        
         pdf.ln(1.8)
             
-        
-        
-        
-        
-        
         i+=1
-    
-    
-    
-    
-    
-    
-    
-    
     
     return pdf
