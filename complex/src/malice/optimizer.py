@@ -77,15 +77,42 @@ class MaliceOptimizer(object):
         visibleconc = list(self.data.visible.drop_duplicates())
         if len(visibleconc) > 1:
             amp_scaler = amp_scaler*(self.data.visible/np.mean(visibleconc))
-
-        broad_denom = np.square(np.square(kex) + (1-5*pa*pb)*np.square(df.dw)) + 4*pa*pb*(1-4*pa*pb)*np.power(df.dw, 4)
-
-        # Compute the fits
+        
+        broad_denom = np.square(np.square(kex) + (1-5*pa*pb)*np.square(df.dw)) + 4*pa*pb*(1-4*pa*pb)*np.power(df.dw,4)
+        
+        #Compute the fits using the Abergel-Palmer approximation
         i_broad = pa*pb*np.square(df.dw)*kex * (np.square(kex)+(1-5*pa*pb)*np.square(df.dw))/broad_denom
-        ihat = df.I_ref/(pa + pb + df.I_ref*(pb*dR2 + i_broad)/amp_scaler)
-        cs_broad = pa*pb*(pa-pb)*np.power(df.dw, 3) * (np.square(kex)+(1-3*pa*pb)*np.square(df.dw))/broad_denom
-        cshat = pb*df.dw - cs_broad
+        ihat_ap = df.I_ref/( pa + pb + df.I_ref*(pb*dR2 + i_broad)/amp_scaler )
+        cs_broad = pa*pb*(pa-pb)*np.power(df.dw,3) * (np.square(kex)+(1-3*pa*pb)*np.square(df.dw))/broad_denom
+        cshat_ap = pb*df.dw - cs_broad
 
+        #If anything is entering slower exchange, compute a mixture of Abergel-Palmer and Swiss-Connick approximations
+        if any( df.dw/kex > 0.9 ):
+            #Compute the fits using the Swiss-Connick approximation
+            dw_sc = df.dw/2
+            pb_sc = np.array([p if p<=0.5 else 1-p for p in pb])
+            pa_sc = 1 - pb_sc
+            ihat_sc_f = amp_scaler / (amp_scaler/df.I_ref + pb*dR2 + pb*np.square(df.dw)*kex/
+                                                                    (np.square(pa)*np.square(kex)+np.square(df.dw)))
+            ihat_sc_r = amp_scaler / (amp_scaler/df.I_ref + pa_sc*dR2 + pb_sc*np.square(df.dw)*kex/
+                                                                    (np.square(pa_sc)*np.square(kex)+np.square(df.dw)))
+
+            cshat_sc_f = pb_sc*dw_sc * (1 + (pa_sc*pb_sc*np.square(kex) - np.square(dw_sc))/
+                                            (np.square(pa_sc)*np.square(kex) + np.square(dw_sc)))
+            cshat_sc_r = df.dw - cshat_sc_f
+
+            sc_truth = pb <= 0.5
+            ihat_sc = ihat_sc_f * sc_truth + ihat_sc_r * ~sc_truth
+            cshat_sc = cshat_sc_f * sc_truth + cshat_sc_r * ~sc_truth
+            
+            #Calculate the mixture of AG and SC fits
+            ap_weight = 1 - 1 / (1+ np.exp(-18*(df.dw/kex-1.3)))
+            ihat = ap_weight*ihat_ap + (1-ap_weight)*ihat_sc
+            cshat = ap_weight*cshat_ap + (1-ap_weight)*cshat_sc
+        else:
+            ihat = ihat_ap
+            cshat = cshat_ap
+        
         return cshat, ihat
     
     def observed_chemical_shift(self, nitrogen_ref, nitrogen,
