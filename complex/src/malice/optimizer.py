@@ -56,8 +56,8 @@ class MaliceOptimizer(object):
 
     # Returns fits for chemical shift and intensity!
     def compute_fits(self, Kd_exp, koff_exp, dR2, amp_scaler, df):
-        Kd = np.power(10, Kd_exp)
-        koff = np.power(10, koff_exp)
+        Kd = np.power(10.0, Kd_exp)
+        koff = np.power(10.0, koff_exp)
         kon = koff/Kd
 
         dimer = ((df.visible + df.titrant + Kd) -

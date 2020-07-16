@@ -1,3 +1,4 @@
+import time
 import datetime
 import os
 import pathlib
@@ -29,7 +30,7 @@ class CompLEx_PDF(FPDF):
     def header(self):
         self.set_font('Arial', 'B', 14)
         self.cell(0, 22/72, txt='CompLEx-NMR v1', ln=0, align='L')
-        self.cell(0, 22/72, txt='Job # blahdeblah', ln=1, align='R')
+        self.cell(0, 22/72, txt=time.strftime("%d %b %Y %H:%M:%S", time.gmtime(self.start_time)), ln=1, align='R')
         #self.ln(1)
  
     def footer(self):
@@ -239,6 +240,7 @@ def set_font_dir():
 
 def CompLEx_Report(optimizer, config, performance, lam, image_dir):
     pdf = CompLEx_PDF(orientation='portrait', unit='in', format='letter')
+    pdf.start_time = performance['start_time']
     pdf.set_margins(0.5,0.5,0.5)
     set_font_dir()
     pdf.add_font('DejaVu', '', 'DejaVuSansCondensed.ttf', uni=True)
@@ -249,7 +251,7 @@ def CompLEx_Report(optimizer, config, performance, lam, image_dir):
     pdf.add_page()
     
     pdf.set_font('Arial','B',16)
-    pdf.cell(0,20/72,txt='Report of CompLEx Results',ln=1,align='C')
+    pdf.cell(0,20/72,txt='Report of CompLEx-NMR Results',ln=1,align='C')
     pdf.ln(0.1)
     
     pdf.set_font('Arial','B',12)
@@ -274,121 +276,13 @@ def CompLEx_Report(optimizer, config, performance, lam, image_dir):
     pdf.cell(5, 12/72, txt=config.input_file.split('/')[-1], ln=1)
     pdf.ln(0.2)
     
-    init_x, init_y = pdf.get_x(), pdf.get_y()
-    
-    fixed_params_text = [('# of global variables', optimizer.gvs, 0),
-                         ('15N-1H scaler', optimizer.nh_scale, 2), 
-                         ('Larmor frequency (Hz)', optimizer.larmor, 0)]
-    pdf.set_font(fixed_width,'BI',12)
-    pdf.cell(3,14/72,txt='Fixed parameters:',ln=1,border=0,align='L')
-    for name, var, round_digits in fixed_params_text:
-        pdf.set_font(fixed_width,'I',10)
-        pdf.cell(2.2, 10/72, txt='    '+name+':', ln=0)
-        pdf.set_font(fixed_width,'B',10)
-        pdf.cell(0.5, 10/72, txt=str(round(var,round_digits)), ln=1, align='R')
-    
-    pdf.ln(0.2)
-    
-    opt_params_text = [('L1 λ', format(lam, '.3f')),
-                       ('Phase 1 islands', config.phase1_islands),
-                       ('Phase 1 generations', config.phase1_generations),
-                       ('Phase 1 rounds of evolution', config.phase1_evo_rounds),
-                       ('Phase 2 islands', config.phase2_islands),
-                       ('Phase 2 generations', config.phase2_generations),
-                       ('Phase 2 rounds of evolution', config.phase2_evo_rounds),
-                       ('Population size', config.pop_size),
-                       ('MCMC walks', config.mcmc_walks),
-                       ('MCMC steps', config.mcmc_steps),
-                       ('Founder seed', get_base_seed()),
-                       ('PyGMO tolerance', format(config.tolerance, '.1g')),
-                       ('Least squares max iterations', format(config.least_squares_max_iter,'.1g'))]
-    pdf.set_font(fixed_width,'BI',12)
-    pdf.cell(3,14/72,txt='Optimization settings:',ln=1,border=0,align='L')
-    for name, var in opt_params_text:
-        pdf.set_font(fixed_width,'I',10)
-        pdf.cell(2.2, 10/72, txt='    '+name+':', ln=0)
-        pdf.set_font(fixed_width,'B',10)
-        pdf.cell(0.5, 10/72, txt=str(var), ln=1, align='R')
-    
-    
-    curr_x = init_x + 3.1
-    pdf.set_xy(curr_x, init_y)
-    
-    ## Insert model performance results here
-    pdf.set_font(fixed_width,'BI',12)
-    pdf.cell(3,14/72,txt='Model performance:',ln=1,border=0,align='L')
-    
-    performance_text = (('L1 Model Penalized -logL', format(performance['l1_model_score'],'.1f')),
-                        ('L1 Model Unpenalized -logL', format(performance['l1_unpenalized_score'],'.1f')),
-                        ('Reference optimized -logL', format(performance['opt_ref_score'],'.1f')),
-                        ('Scaled Δω optimized -logL', format(performance['scaled_dw_score'],'.1f')),
-                        ('Final model -logL', format(performance['ml_model_score'],'.1f')),
-                        ('L1 optimization runtime', str(datetime.timedelta(seconds=performance['phase1_time'])).split('.')[0]),
-                        ('Reference optimization runtime', str(datetime.timedelta(seconds=performance['phase2_time'])).split('.')[0]),
-                        ('ML optimization runtime', str(datetime.timedelta(seconds=performance['phase3_time'])).split('.')[0]),
-                        ('MCMC runtime', str(datetime.timedelta(seconds=performance['phase4_time'])).split('.')[0]),
-                        ('Total runtime', str(datetime.timedelta(seconds=performance['current_time'])).split('.')[0]))
-    
-    for name, var in performance_text:
-        pdf.set_font(fixed_width,'I',10)
-        pdf.set_x(curr_x)
-        pdf.cell(2.5, 10/72, txt='    '+name+':', ln=0)
-        pdf.set_font(fixed_width,'B',10)
-        pdf.cell(0.5, 10/72, txt=var, ln=1, align='R')
-    
-    pdf.ln(0.1)
-    
-    ## Insert table of global variable and estimates
-    #width = 0.85
-    width = 1.0
-    
-    pdf.set_line_width(1/72)
-    #pdf.set_fill_color(255, 255, 255)
-    pdf.rect(curr_x, pdf.get_y()-0.02, 4*width+0.02,(12+7*10)/72+0.10, 'D')
-
-    global_variables_text = (('Kd (uM)', format(np.power(10.0,optimizer.ml_model[0]),'.1f'), format(np.power(10.0,optimizer.lower_conf_limits[0]),'.1f'),
-                              format(np.power(10.0,optimizer.upper_conf_limits[0]),'.1f')),
-                             ('koff (Hz)', format(np.power(10.0,optimizer.ml_model[1]),'.1f'), format(np.power(10.0,optimizer.lower_conf_limits[1]),'.1f'),
-                              format(np.power(10.0,optimizer.upper_conf_limits[1]),'.1f')),
-                             ('ΔR2 (Hz)', format(optimizer.ml_model[2],'.2f'), format(optimizer.lower_conf_limits[2],'.2f'), format(optimizer.upper_conf_limits[2],'.2f')),
-                             ('Amplitude scaler', format(optimizer.ml_model[3],'.2g'), format(optimizer.lower_conf_limits[3],'.2g'), format(optimizer.upper_conf_limits[3],'.2g')),
-                             ('Intensity ε', format(optimizer.ml_model[4],'.2g'), format(optimizer.lower_conf_limits[4],'.2g'), format(optimizer.upper_conf_limits[4],'.2g')),
-                             ('CS ε (Hz)', format(optimizer.ml_model[5],'.2f'), format(optimizer.lower_conf_limits[5],'.2f'), format(optimizer.upper_conf_limits[5],'.2f')))  
-    pdf.set_font(fixed_width,'BI',12)
-    pdf.set_x(curr_x)
-    pdf.cell(3,14/72,txt='Global variables:',ln=1,border=0,align='L')
-    pdf.ln(0.05)
-    pdf.set_font(fixed_width,'BIU',10)
-    pdf.set_x(curr_x)
-    pdf.cell(width, 10/72, txt='Variable', ln=0, align='L')
-    pdf.set_x(curr_x+width)
-    pdf.cell(width, 10/72, txt='ML Estimate', ln=0, align='C')
-    pdf.set_x(curr_x+2*width)
-    alpha_l = (1-config.confidence)/2
-    alpha_u = 1-alpha_l
-    pdf.cell(width, 10/72, txt=format(alpha_l,'.1%')+' CL', ln=0, align='C')
-    pdf.set_x(curr_x+3*width)
-    pdf.cell(width, 10/72, txt=format(alpha_u,'.1%')+ 'CL', ln=1, align='C')
-    #for name, mle, stderr, lower_cl, upper_cl in global_variables_text:
-    for name, mle, lower_cl, upper_cl in global_variables_text:
-        pdf.set_x(curr_x)
-        pdf.set_font(fixed_width,'I',10)
-        pdf.cell(width, 10/72, txt = name, ln=0, align='L')
-        pdf.set_font(fixed_width,'B',10)
-        pdf.set_x(curr_x+width)
-        pdf.cell(width, 10/72, txt = str(mle), ln=0, align='C')
-        pdf.set_x(curr_x+2*width)
-        pdf.cell(width, 10/72, txt = str(lower_cl), ln=0, align='C')
-        pdf.set_x(curr_x+3*width)
-        pdf.cell(width, 10/72, txt = str(upper_cl), ln=1, align='C')
-    
-    pdf.ln(0.1)
-    
-    ## Add a couple of lines about other output files that have been generated
+    ## Add info other output files that have been generated
     fname_prefix = config.input_file.split('/')[-1].split('.')[0]
-    file_text = (('Reference peak optimization', fname_prefix + '_reference_peaks.csv'),
-                 ('Δω spreadsheeet', fname_prefix + '_CompLEx_fits.csv'),
-                 ('Δω text file', fname_prefix + '_CompLEx_deltaw.txt'))
+    file_text = (('Summary PDF', fname_prefix + '_CompLEx_summary.pdf'),
+                 ('Reference peak optimization', fname_prefix + '_reference_peaks.csv'),
+                 ('Δω spreadsheeet', fname_prefix + '_CompLEx_deltaw.csv'),
+                 ('Δω text file', fname_prefix + '_CompLEx_deltaw.txt'),
+                 ('Model fits of supplied data', fname_prefix + '_CompLEx_fit_points.csv'))
     pdf.set_font(fixed_width,'BI',12)
     pdf.cell(3, 12/72, txt='Output files:', ln=1, align='L')
     for name, var in file_text:
@@ -398,7 +292,61 @@ def CompLEx_Report(optimizer, config, performance, lam, image_dir):
         pdf.cell(3, 10/72, txt=var, ln=1, align='L')
     
     pdf.ln(0.2)
+
+    ## Insert table of global variable and estimates
+    #width = 0.85
+    #width = 1.0
+    width = 1.6
+
+    init_x, init_y = pdf.get_x(), pdf.get_y()
     
+    curr_x = init_x + 0.1
+    pdf.set_xy(curr_x, init_y)
+
+    pdf.set_line_width(1/72)
+    #pdf.set_fill_color(255, 255, 255)
+    #pdf.rect(curr_x, pdf.get_y()-0.02, 4*width+0.02,(12+7*10)/72+0.10, 'D')
+
+    pdf.rect(curr_x, pdf.get_y()-0.02, width*4+0.8, (12+7*15)/72+0.10, 'D')
+
+    global_variables_text = (('Kd (μM)', format(np.power(10.0,optimizer.ml_model[0]),'.1f'), format(np.power(10.0,optimizer.lower_conf_limits[0]),'.1f'),
+                              format(np.power(10.0,optimizer.upper_conf_limits[0]),'.1f')),
+                             ('koff (Hz)', format(np.power(10.0,optimizer.ml_model[1]),'.2g'), format(np.power(10.0,optimizer.lower_conf_limits[1]),'.2g'),
+                              format(np.power(10.0,optimizer.upper_conf_limits[1]),'.2g')),
+                             ('ΔR2 (Hz)', format(optimizer.ml_model[2],'.2f'), format(optimizer.lower_conf_limits[2],'.2f'), format(optimizer.upper_conf_limits[2],'.2f')),
+                             ('Amplitude scaler', format(optimizer.ml_model[3],'.2g'), format(optimizer.lower_conf_limits[3],'.2g'), format(optimizer.upper_conf_limits[3],'.2g')),
+                             ('Intensity ε', format(optimizer.ml_model[4],'.2g'), format(optimizer.lower_conf_limits[4],'.2g'), format(optimizer.upper_conf_limits[4],'.2g')),
+                             ('CS ε (Hz)', format(optimizer.ml_model[5],'.2f'), format(optimizer.lower_conf_limits[5],'.2f'), format(optimizer.upper_conf_limits[5],'.2f')))  
+    pdf.set_font(fixed_width,'BI',12)
+    pdf.set_x(curr_x)
+    pdf.cell(3,14/72,txt='Global variables:',ln=1,border=0,align='L')
+    pdf.ln(0.05)
+    pdf.set_font(fixed_width,'BIU',11)
+    pdf.set_x(curr_x+0.4)
+    pdf.cell(width, 15/72, txt='Variable', ln=0, align='L')
+    pdf.set_x(curr_x+0.4+width)
+    pdf.cell(width, 15/72, txt='ML Estimate', ln=0, align='C')
+    pdf.set_x(curr_x+0.4+2*width)
+    alpha_l = (1-config.confidence)/2
+    alpha_u = 1-alpha_l
+    pdf.cell(width, 15/72, txt=format(alpha_l,'.1%')+' Conf. Limit', ln=0, align='C')
+    pdf.set_x(curr_x+0.4+3*width)
+    pdf.cell(width, 15/72, txt=format(alpha_u,'.1%')+ ' Conf. Limit', ln=1, align='C')
+    #for name, mle, stderr, lower_cl, upper_cl in global_variables_text:
+    for name, mle, lower_cl, upper_cl in global_variables_text:
+        pdf.set_x(curr_x+0.4)
+        pdf.set_font(fixed_width,'I',11)
+        pdf.cell(width, 15/72, txt = name, ln=0, align='L')
+        pdf.set_font(fixed_width,'B',11)
+        pdf.set_x(curr_x+0.4+width)
+        pdf.cell(width, 15/72, txt = str(mle), ln=0, align='C')
+        pdf.set_x(curr_x+0.4+2*width)
+        pdf.cell(width, 15/72, txt = str(lower_cl), ln=0, align='C')
+        pdf.set_x(curr_x+0.4+3*width)
+        pdf.cell(width, 15/72, txt = str(upper_cl), ln=1, align='C')
+    
+    pdf.ln(0.4)
+
     ## Add plot of the per-residue delta_w fits
     
     rainbow_cmap = truncate_colormap(plt.get_cmap('jet'), 0.18, 0.92, n=1024)
@@ -412,15 +360,22 @@ def CompLEx_Report(optimizer, config, performance, lam, image_dir):
     ax.errorbar('residue', 'dw', data=deltaw_df, yerr=dw_error_bars,
                 color='black', fmt='none', s=32, zorder=1)
     ax.scatter('residue', 'dw', data=deltaw_df, c=deltaw_df.residue, cmap=rainbow_cmap, edgecolors='black', linewidths=0.5, s=48, zorder=2)
-    ax.set(title='Per-residue estimates of Δω', xlabel='Residue No.', ylabel='Δω (ppm)', 
-           xlim=(deltaw_df.residue.min()-1,deltaw_df.residue.max()+1),
+    ax.set(xlim=(deltaw_df.residue.min()-1,deltaw_df.residue.max()+1),
            ylim = (-0.02, 1.05*max(optimizer.upper_conf_limits[optimizer.gvs:])/optimizer.larmor))
+    ax.set_title('Per-residue estimates of Δω', fontsize=12)
+    ax.set_xlabel('Residue No.', fontsize=12)
+    ax.set_ylabel('Δω (ppm)', fontsize=12)
+           
     fig.tight_layout(pad=0.3)
+    #fig.tight_layout()
     fig.savefig(os.path.join(image_dir,'deltaw_plot.jpg'), dpi=300, quality=80)
     plt.close(fig)
     
     pdf.image(os.path.join(image_dir,'deltaw_plot.jpg'), x = pdf.get_x(), y=pdf.get_y(),
               w = 7.5, h = 4.5)
+
+
+
     
     ## End of page 1, now to add residue-specific stuff to subsequent pages
     fit_points = optimizer.pfitter()
@@ -534,7 +489,10 @@ def CompLEx_Report(optimizer, config, performance, lam, image_dir):
             #ss_residual = np.sum( np.square(residue_fits[points[i]]-residue_fits[lines[i]]) )
             #R2 = 1 - ss_residual/ss_total
             slope, intercept, r_value, p_value, std_err = stats.linregress(residue_fits[points[i]],residue_fits[lines[i]])
-            ax[i].text(xl[0]+0.05*(xl[1]-xl[0]), yaxes[i][1]-0.15*(yaxes[i][1]-yaxes[i][0]), 'r = '+format(r_value,'.2f'),fontsize=7)
+            if i == 0:
+                ax[i].text(xl[0]+0.05*(xl[1]-xl[0]), yaxes[i][1]-0.15*(yaxes[i][1]-yaxes[i][0]), 'r = '+format(r_value,'.2f'),fontsize=7)
+            else:
+                ax[i].text(xl[0]+0.75*(xl[1]-xl[0]), yaxes[i][1]-0.15*(yaxes[i][1]-yaxes[i][0]), 'r = '+format(r_value,'.2f'),fontsize=7)
         fig.tight_layout(pad=0.3,h_pad=0.1)
         #fig_path = os.path.join(image_dir,file_names[i]+str(residue)+'.png')
         fig_path = os.path.join(image_dir,'regression_lines_residue_'+str(residue)+'.png')
@@ -607,5 +565,80 @@ def CompLEx_Report(optimizer, config, performance, lam, image_dir):
         pdf.ln(1.8)
             
         i+=1
+
+
+    '''
+    init_x, init_y = pdf.get_x(), pdf.get_y()
     
+    fixed_params_text = [('# of global variables', optimizer.gvs, 0),
+                         ('15N-1H scaler', optimizer.nh_scale, 2), 
+                         ('Larmor frequency (Hz)', optimizer.larmor, 0)]
+    pdf.set_font(fixed_width,'BI',12)
+    pdf.cell(3,14/72,txt='Fixed parameters:',ln=1,border=0,align='L')
+    for name, var, round_digits in fixed_params_text:
+        pdf.set_font(fixed_width,'I',10)
+        pdf.cell(2.2, 10/72, txt='    '+name+':', ln=0)
+        pdf.set_font(fixed_width,'B',10)
+        pdf.cell(0.5, 10/72, txt=str(round(var,round_digits)), ln=1, align='R')
+    
+    pdf.ln(0.2)
+    
+    opt_params_text = [('L1 λ', format(lam, '.3f')),
+                       ('Phase 1 islands', config.phase1_islands),
+                       ('Phase 1 generations', config.phase1_generations),
+                       ('Phase 1 rounds of evolution', config.phase1_evo_rounds),
+                       ('Phase 2 islands', config.phase2_islands),
+                       ('Phase 2 generations', config.phase2_generations),
+                       ('Phase 2 rounds of evolution', config.phase2_evo_rounds),
+                       ('Population size', config.pop_size),
+                       ('MCMC walks', config.mcmc_walks),
+                       ('MCMC steps', config.mcmc_steps),
+                       ('Founder seed', get_base_seed()),
+                       ('PyGMO tolerance', format(config.tolerance, '.1g')),
+                       ('Least squares max iterations', format(config.least_squares_max_iter,'.1g'))]
+    pdf.set_font(fixed_width,'BI',12)
+    pdf.cell(3,14/72,txt='Optimization settings:',ln=1,border=0,align='L')
+    for name, var in opt_params_text:
+        pdf.set_font(fixed_width,'I',10)
+        pdf.cell(2.2, 10/72, txt='    '+name+':', ln=0)
+        pdf.set_font(fixed_width,'B',10)
+        pdf.cell(0.5, 10/72, txt=str(var), ln=1, align='R')
+    
+    
+    curr_x = init_x + 3.1
+    pdf.set_xy(curr_x, init_y)
+    
+    ## Insert model performance results here
+    pdf.set_font(fixed_width,'BI',12)
+    pdf.cell(3,14/72,txt='Model performance:',ln=1,border=0,align='L')
+    
+    performance_text = (('L1 Model Penalized -logL', format(performance['l1_model_score'],'.1f')),
+                        ('L1 Model Unpenalized -logL', format(performance['l1_unpenalized_score'],'.1f')),
+                        ('Reference optimized -logL', format(performance['opt_ref_score'],'.1f')),
+                        ('Scaled Δω optimized -logL', format(performance['scaled_dw_score'],'.1f')),
+                        ('Final model -logL', format(performance['ml_model_score'],'.1f')),
+                        ('L1 optimization runtime', str(datetime.timedelta(seconds=performance['phase1_time'])).split('.')[0]),
+                        ('Reference optimization runtime', str(datetime.timedelta(seconds=performance['phase2_time'])).split('.')[0]),
+                        ('ML optimization runtime', str(datetime.timedelta(seconds=performance['phase3_time'])).split('.')[0]),
+                        ('MCMC runtime', str(datetime.timedelta(seconds=performance['phase4_time'])).split('.')[0]),
+                        ('Total runtime', str(datetime.timedelta(seconds=performance['current_time'])).split('.')[0]))
+    
+    for name, var in performance_text:
+        pdf.set_font(fixed_width,'I',10)
+        pdf.set_x(curr_x)
+        pdf.cell(2.5, 10/72, txt='    '+name+':', ln=0)
+        pdf.set_font(fixed_width,'B',10)
+        pdf.cell(0.5, 10/72, txt=var, ln=1, align='R')
+    
+    pdf.ln(0.1)
+    '''
+    
+    
+
+
+
+
+
+
+
     return pdf
