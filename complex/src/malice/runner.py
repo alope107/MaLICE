@@ -2,6 +2,7 @@ import concurrent
 import concurrent.futures
 import datetime
 import os
+import sys
 import time
 
 import numpy as np
@@ -79,7 +80,7 @@ def csp_trajectory(theta, data_points, nh_scale):
 
 
 def main():
-    args = parse_args()
+    args = parse_args(sys.argv[1:])
     make_output_dir(args.output_dir)
     set_base_seed(args.seed)
     run_malice(args)
