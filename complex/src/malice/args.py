@@ -1,6 +1,6 @@
 import argparse
 
-def parse_args():
+def parse_args(args):
     parser = argparse.ArgumentParser()
     parser.add_argument('input_file', 
                         type=str, 
@@ -83,4 +83,4 @@ def parse_args():
                         help='S3 bucket and key prefix to upload zip to. Do not include trailing "/"',
                         default=None)
     # TODO: validate arguments
-    return parser.parse_args()
+    return parser.parse_args(args)

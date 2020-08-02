@@ -1,4 +1,5 @@
 import os
+import sys
 from zipfile import ZipFile
 
 import s3fs
@@ -9,7 +10,7 @@ from malice.args import parse_args
 
 def main():
     # Validate arguments
-    args = parse_args()
+    args = parse_args(sys.argv[1:])
     if args.s3_prefix is None:
         raise ValueError("s3_prefix must be set when running in upload mode.")
 
