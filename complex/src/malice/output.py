@@ -31,6 +31,10 @@ def create_output_files(optimizer, confidence, gvs, residues, fname_prefix,
     deltaw_df.to_csv(csv_name, index=False)
     deltaw_df[['residue', 'delta_w']].to_csv(txt_name, index=False, header=False)
 
+    confidence_name = os.path.join(output_dir, fname_prefix + '_CompLEx_confidence_df.csv')
+    #mcmcLogL_name = os.path.join(output_dir, fname_prefix + '_CompLEx_mcmcLogL.csv')
+    optimizer.confidence_df.to_csv(confidence_name, index=False)
+    #optimizer.mcmc_logL.to_csv(mcmcLogL_name, index=False)
     
     # Put columns in desired order for output
     fit_points = fit_points[["residue", "15N", "1H", "intensity", "titrant", "visible", 

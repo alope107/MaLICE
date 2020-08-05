@@ -158,6 +158,9 @@ class MaliceOptimizer(object):
             titrant_vals = np.linspace(np.min(concs.titrant)-0.1*titrant_rng,
                                         np.max(concs.titrant)+0.1*titrant_rng,
                                         1000)
+            # 200731 I think it makes sense to instead just let the titrant levels start at 0 rather than some defined minimum
+            titrant_vals = np.linspace(0, np.max(concs.titrant)+0.1*titrant_rng, 1000)
+            
             visible_vals = titrant_visible_lm.slope*titrant_vals + titrant_visible_lm.intercept
             fitter_input = pd.DataFrame({'titrant': titrant_vals,
                                             'visible': visible_vals})
