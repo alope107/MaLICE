@@ -612,8 +612,8 @@ def CompLEx_Report(optimizer, config, performance, lam, image_dir):
                     pdf.cell(1.7, 9/72, txt='- CSP trajectory detected (p = '+format(focal_theta_p,'.2g')+'):', 
                             ln=1, align='L')
                     pdf.set_x(pdf.get_x()+5.7)
-                    pdf.cell(1.7, 9/72, txt='         15N: '+format(focal_dw*np.sin(focal_theta)/optimizer.nh_scale, '+.3f')+
-                                            '      1H: '+format(focal_dw*np.cos(focal_theta), '+.3f'), ln=1, align='L')
+                    pdf.cell(1.7, 9/72, txt='         15N: '+format(float(current_ref['15N_ref'])+focal_dw*np.sin(focal_theta)/optimizer.nh_scale, '.3f')+
+                                            '      1H: '+format(float(current_ref['1H_ref'])+focal_dw*np.cos(focal_theta), '.3f'), ln=1, align='L')
                     note_lines +=2
             
             pdf.ln(9/72)

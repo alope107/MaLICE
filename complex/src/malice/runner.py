@@ -23,7 +23,7 @@ def gen_pop1(optimizer):
     # Will span from 100 nM to 10 mM
     Kd_exp_random = list(np.random.random(1)*5-1)
     # Will span from 1 kHz to 10 Mhz
-    kex_exp_random = list(np.random.random(1)*4+3)
+    kex_exp_random = list(np.random.random(1)*4)
     # 0 - 200 Hz
     dR2_random = list(np.random.random(1)*200)
     # random amp logic is that since amp = intensity * lw, lets just randomly
@@ -133,8 +133,8 @@ def run_malice(config):
     # Stage 1 - parameter optimization with L1 regularization
     print('\n---  Phase 1: Differential evolution for parameter optimization with L1 regularization  ---\n')
 
-    l1_bounds_min = [-1, 1, 0, np.min(user_data.intensity)/10, i_noise_est/10, larmor/4500] + list([0]*len(residues))
-    l1_bounds_max = [4, 7, 200, np.max(user_data.intensity)*200, i_noise_est*10, larmor/5] + list([6*larmor]*len(residues))
+    l1_bounds_min = [-1, 0, 0, np.min(user_data.intensity)/10, i_noise_est/10, larmor/4500] + list([0]*len(residues))
+    l1_bounds_max = [4, 5, 200, np.max(user_data.intensity)*200, i_noise_est*10, larmor/5] + list([6*larmor]*len(residues))
     optimizer.set_bounds((l1_bounds_min, l1_bounds_max))
 
     optimizer.l1_model, performance['l1_model_score'] = pygmo_wrapper(optimizer,
@@ -299,31 +299,39 @@ def run_malice(config):
     futures = [executor.submit(mcmc.walk, optimizer, config.mcmc_steps, config.confidence, l1_bounds_min, l1_bounds_max, k) for k in range(config.mcmc_walks)]
     concurrent.futures.wait(futures)
 
+    print('Futures finished')
     accepted_steps = []
     for future in futures:
         accepted_steps = accepted_steps + future.result() 
+    print('Accepted steps made')
     # Sort the MCMC runs by logL
     #accepted_steps.sort(key=lambda x:optimizer.fitness(x)[0])
-    accepted_step_logLs = [optimizer.fitness(m)[0] for m in accepted_steps]
+    #accepted_step_logLs = [optimizer.fitness(m)[0] for m in accepted_steps]
+    print('logL values calculated for accepted steps')
     # Do a fast sorting on the models
-    sorted_steps = [x for _,x in sorted(zip(accepted_step_logLs, accepted_steps))]
+    #sorted_steps = [x for _,x in sorted(zip(accepted_step_logLs, accepted_steps))]
+    sorted_steps = list(accepted_steps)
+    sorted_steps.sort(key=lambda x:x[0])
+    print('Steps sorted')
     # Temporary output file so I can QC how spread out the logL scores are, may add as a real output
     #optimizer.mcmc_logL = accepted_stop_logLs
     fout = open('logL.txt','w')
-    for logL in accepted_step_logLs:
-        fout.write(format(logL,'.3f')+'\n')
+    #for logL in accepted_step_logLs:
+    for sorted_step in sorted_steps:
+        fout.write(format(sorted_step[0],'.3f')+'\n')
     fout.close()
+    print('logL.txt written')
 
 
     ## Set up initial lower/upper confidence levels as the ML model
     confidences = []
     lower_conf_values = list(optimizer.ml_model)
     upper_conf_values = list(optimizer.ml_model)
-    for model in sorted_steps:
+    for logL, model in sorted_steps:
         # Since the models are in order of increasing logL, compute the %ile that the model represents, and update the quantiles
         # as needed for the min/max values
-        delta_logL = optimizer.fitness(model)[0] - performance['ml_model_score']
-        model_conf_level = stats.chi2.cdf( 2*delta_logL, df=1)
+        delta_logL = logL - performance['ml_model_score']
+        model_conf_level = stats.chi2.cdf( 2*delta_logL, df=len(model))
         lower_quantile = (1 - model_conf_level)/2
         upper_quantile = 1 - lower_quantile
 

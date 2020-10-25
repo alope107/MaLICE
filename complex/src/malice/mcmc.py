@@ -32,9 +32,12 @@ def walk(optimizer, steps, confidence, min_global, max_global, iterator, steps_t
         if max_mcmc[i] > max_global[i]:
             max_mcmc[i] = max_global[i]
 
-    tolerated_negLL = walker.fitness(walker.ml_model)[0] + stats.chi2.ppf(confidence, df=1)/2
-
     model = list(walker.ml_model)
+    model_score = float(walker.fitness(walker.ml_model)[0])
+    
+    #tolerated_negLL = walker.fitness(walker.ml_model)[0] + stats.chi2.ppf(confidence, df=len(model))/2
+    #tolerated_negLL = walker.fitness(walker.ml_model)[0] + 200
+    
 
     modulator = 1.0
     target_accept_rate = 0.7
@@ -98,12 +101,16 @@ def walk(optimizer, steps, confidence, min_global, max_global, iterator, steps_t
         '''
         ## 200804 updated after fixing the problem of both gaussian cs errors and the lambda...
         ## Let's just reduce everything 100x and see how that works...
-        global_scalers = [0.0, 0.0, 0.0, 0.00003, 0.00003, 0.0]
-        deltaw_scalers = [0.00003]*len(model[walker.gvs:])
+        ## Going back up to only 10X reduction
+        ## 200805 - test1 = 10X reduction and doesn't look good. going back to no dilution
+        ## 200820 Need to do calibration test, so going back to super duper initial low perturbation, with many steps, and variable
+        ## thresholds so that it can more reasonably explore the landscape
+        global_scalers = [0.0, 0.0, 0.0, 0.0003, 0.0003, 0.0]
+        deltaw_scalers = [0.0003]*len(model[walker.gvs:])
         scaled_perturbation = np.array( global_scalers + deltaw_scalers )
         
-        global_offsets = [0.00003, 0.0012, 0.0005, 0, 0, 0.0002]
-        deltaw_offsets = [0.01]*(len(model)-walker.gvs)
+        global_offsets = [0.0003, 0.012, 0.005, 0, 0, 0.002]
+        deltaw_offsets = [0.1]*(len(model)-walker.gvs)
         offset_perturbation = np.array ( global_offsets + deltaw_offsets )
 
         perturbation = (2*(np.random.random(len(model))-0.5)) * (scaled_perturbation*model + offset_perturbation)
@@ -116,12 +123,20 @@ def walk(optimizer, steps, confidence, min_global, max_global, iterator, steps_t
                 model[j] = min_mcmc[j]
             if model[j] > max_mcmc[j]:
                 model[j] = max_mcmc[j]
+        new_score = float(walker.fitness(model)[0])
+        #print(new_score)
 
-        if walker.fitness(model)[0] <= tolerated_negLL:
+        ## 200820 I want to explore from 1 to 100 logL units, so let's adjust the tolerated_negLL to ramp up over the course
+        tolerated_negLL = model_score + int( float(i) / (steps/100) ) + 1  
+        ## So in a 100K step run, it should spend 1k steps at every threshold
+        #tolerated_negLL = 200
+        if new_score <= tolerated_negLL:
+            #print('passed!')
             #if walker.fitness(model)[0] > 1e4: print('MCMC step >10K')
-            accepted_steps.append(list(model))
+            accepted_steps.append( (new_score, model) )
             consecutive_failed = 0
         else:
+            #print('failed!')
             model = list(prev_model)
             temp_failed += 1
             consecutive_failed += 1
@@ -136,9 +151,10 @@ def walk(optimizer, steps, confidence, min_global, max_global, iterator, steps_t
                 # Accepting at >= target, so increase step size by 5%
                 modulator = 1.05 * modulator
             temp_failed = 0  # Reset the counter
-            
-        if consecutive_failed > abort_threshold:
-            break
+
+        ## 200820 For the moment, let's disable the abortion    
+        #if consecutive_failed > abort_threshold:
+        #    break
 
     print('Walk #'+str(iterator+1)+': Accepted '+str(len(accepted_steps))+' of '+str(i+1)+' steps')
 

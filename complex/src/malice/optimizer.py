@@ -89,6 +89,7 @@ class MaliceOptimizer(object):
         #If anything is entering slower exchange, compute a mixture of Abergel-Palmer and Swiss-Connick approximations
         if any( df.dw/kex > 0.9 ):
             #Compute the fits using the Swiss-Connick approximation
+            '''
             dw_sc = df.dw/2
             pb_sc = np.array([p if p<=0.5 else 1-p for p in pb])
             pa_sc = 1 - pb_sc
@@ -104,6 +105,28 @@ class MaliceOptimizer(object):
             sc_truth = pb <= 0.5
             ihat_sc = ihat_sc_f * sc_truth + ihat_sc_r * ~sc_truth
             cshat_sc = cshat_sc_f * sc_truth + cshat_sc_r * ~sc_truth
+            '''
+
+            # Test 201008
+            # New implementation of Swift-Connick approximation that tries to calculate the two peaks during slow exchange,
+            # infers which one based on if the observed CSP is closer to 0 (free) or delta_w (bound)
+
+            cshat_sc_a = pb*df.dw * (1 + (pa*pb*np.square(kex)-np.square(df.dw))/
+                                         (np.square(pa)*np.square(kex)+np.square(df.dw)))
+            cshat_sc_b = pb*df.dw - pa*df.dw*((pa*pb*np.square(kex)-np.square(df.dw))/
+                                          (np.square(pb)*np.square(kex)+np.square(df.dw)))
+            
+            ihat_sc_a = amp_scaler / (pa*amp_scaler/df.I_ref + pb*dR2 + pb*np.square(df.dw)*kex/
+                                                                    (np.square(pa)*np.square(kex)+np.square(df.dw)))
+            ihat_sc_b = amp_scaler / (pa*amp_scaler/df.I_ref + pb*dR2 + pa*np.square(df.dw)*kex/
+                                                                    (np.square(pb)*np.square(kex)+np.square(df.dw)))
+            
+            # Determine if should use a or b form
+            ab_select = self.observed_chemical_shift(self.reference['15N_ref'], df['15N'], self.reference['1H_ref'], df['1H']) <= df.dw/2
+
+            cshat_sc = ab_select*cshat_sc_a + ab_select*cshat_sc_b
+            ihat_sc = ab_select*ihat_sc_a + ~ab_select*ihat_sc_b
+
             
             #Calculate the mixture of AG and SC fits
             ap_weight = 1 - 1 / (1+ np.exp(-18*(df.dw/kex-1.3)))
