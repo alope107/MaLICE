@@ -87,7 +87,7 @@ class MaliceOptimizer(object):
         cshat_ap = pb*df.dw - cs_broad
 
         #If anything is entering slower exchange, compute a mixture of Abergel-Palmer and Swiss-Connick approximations
-        if any( df.dw/kex > 0.9 ):
+        if self.mode != 'lfitter' and any( df.dw/kex > 0.9 ):
             #Compute the fits using the Swiss-Connick approximation
             '''
             dw_sc = df.dw/2

@@ -322,6 +322,9 @@ def run_malice(config):
     fout.close()
     print('logL.txt written')
 
+    ## QUICK PATCH IN CASE NO STEPS ARE ACCEPTED
+    if len(sorted_steps) == 0:
+        sorted_steps == [(performance['ml_model_score'], optimizer.ml_model)]*100
 
     ## Set up initial lower/upper confidence levels as the ML model
     confidences = []
@@ -386,11 +389,15 @@ def run_malice(config):
     confidence_df = confidence_df.sort_values('conf_level')
     optimizer.confidence_df = confidence_df
     
-    
-    optimizer.lower_conf_limits = list( confidence_df.loc[confidence_df.conf_level.sub(0.025).abs().idxmin(), 
-                                                          confidence_df.columns[1:]] )
-    optimizer.upper_conf_limits = list( confidence_df.loc[confidence_df.conf_level.sub(0.975).abs().idxmin(), 
-                                                          confidence_df.columns[1:]] )
+    ## QUICK PATCH IN CASE NO STEPS ARE ACCEPTED
+    if len(confidence_df) == 0:
+        optimizer.lower_conf_limits = list(optimizer.ml_model)
+        optimizer.upper_conf_limits = list(optimizer.ml_model)
+    else:
+        optimizer.lower_conf_limits = list( confidence_df.loc[confidence_df.conf_level.sub(0.025).abs().idxmin(), 
+                                                            confidence_df.columns[1:]] )
+        optimizer.upper_conf_limits = list( confidence_df.loc[confidence_df.conf_level.sub(0.975).abs().idxmin(), 
+                                                            confidence_df.columns[1:]] )
 
     performance['phase4_time'] = time.time() - performance['start_time']
     performance['current_time'] = time.time() - performance['start_time']
