@@ -7,7 +7,8 @@ import scipy.stats as stats
 
 # Returns L1 norm of a vector scaled by the given factor.
 def regularization_penalty(lam, vector):
-    return lam * np.linalg.norm(vector, 1)
+    #return lam * np.linalg.norm(vector, 1)
+    return lam * np.sum(np.square(vector))
 
 def merged_residue_df(observed_df, reference_df):
     return pd.merge(observed_df, reference_df, on='residue')
@@ -87,7 +88,38 @@ class MaliceOptimizer(object):
         cshat_ap = pb*df.dw - cs_broad
 
         #If anything is entering slower exchange, compute a mixture of Abergel-Palmer and Swiss-Connick approximations
-        if self.mode != 'lfitter' and any( df.dw/kex > 0.9 ):
+        ## TEMPORARILY DISABLE THE SC CODE
+        if self.mode != 'lfitter' and any( df.dw/kex >= 2 ):
+            ## At least one peak is past the AP limit for intermediate exchange and slow exchange must be calculated
+            
+            
+            r2_f = amp_scaler / df.I_ref
+            r2_b = r2_f + dR2
+
+            ## Intensities
+            r2_1 = pa*r2_f + pb*r2_b + pb*np.square(df.dw)*kex/(np.square(pa)*np.square(kex)+np.square(df.dw))
+            r2_2 = pa*r2_f + pb*r2_b + pa*np.square(df.dw)*kex/(np.square(pb)*np.square(kex)+np.square(df.dw))
+
+            I_1 = pa * amp_scaler / r2_1
+            I_2 = pb * amp_scaler / r2_2
+
+            ## Chemical shifts
+            cs_1 = pb*df.dw + pb*df.dw * (pa*pb*np.square(kex) - np.square(df.dw))/(np.square(pa)*np.square(kex) + np.square(df.dw))
+            cs_2 = pb*df.dw - pa*df.dw * (pa*pb*np.square(kex) - np.square(df.dw))/(np.square(pb)*np.square(kex) + np.square(df.dw))
+
+            ab_select = self.observed_chemical_shift(self.reference['15N_ref'], df['15N'], self.reference['1H_ref'], df['1H']) <= df.dw/2
+            cshat_sc = ab_select*cs_1 + ~ab_select*cs_2
+            ihat_sc = ab_select*I_1 + ~ab_select*I_2
+
+            ap_select = df.dw / kex < 2
+            ihat = ap_select*ihat_ap + ~ap_select*ihat_sc
+            cshat = ap_select*cshat_ap + ~ap_select*cshat_sc
+
+
+
+
+
+            #if self.mode != 'lfitter':
             #Compute the fits using the Swiss-Connick approximation
             '''
             dw_sc = df.dw/2
@@ -105,7 +137,7 @@ class MaliceOptimizer(object):
             sc_truth = pb <= 0.5
             ihat_sc = ihat_sc_f * sc_truth + ihat_sc_r * ~sc_truth
             cshat_sc = cshat_sc_f * sc_truth + cshat_sc_r * ~sc_truth
-            '''
+            
 
             # Test 201008
             # New implementation of Swift-Connick approximation that tries to calculate the two peaks during slow exchange,
@@ -124,14 +156,16 @@ class MaliceOptimizer(object):
             # Determine if should use a or b form
             ab_select = self.observed_chemical_shift(self.reference['15N_ref'], df['15N'], self.reference['1H_ref'], df['1H']) <= df.dw/2
 
-            cshat_sc = ab_select*cshat_sc_a + ab_select*cshat_sc_b
+            cshat_sc = ab_select*cshat_sc_a + ~ab_select*cshat_sc_b
             ihat_sc = ab_select*ihat_sc_a + ~ab_select*ihat_sc_b
 
             
             #Calculate the mixture of AG and SC fits
-            ap_weight = 1 - 1 / (1+ np.exp(-18*(df.dw/kex-1.3)))
+            #ap_weight = 1 - 1 / (1+ np.exp(-18*(df.dw/kex-1.3)))
+            ap_weight = 0
             ihat = ap_weight*ihat_ap + (1-ap_weight)*ihat_sc
             cshat = ap_weight*cshat_ap + (1-ap_weight)*cshat_sc
+            '''
         else:
             ihat = ihat_ap
             cshat = cshat_ap

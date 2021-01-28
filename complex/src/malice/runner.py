@@ -23,7 +23,7 @@ def gen_pop1(optimizer):
     # Will span from 100 nM to 10 mM
     Kd_exp_random = list(np.random.random(1)*5-1)
     # Will span from 1 kHz to 10 Mhz
-    kex_exp_random = list(np.random.random(1)*4)
+    koff_exp_random = list(np.random.random(1)*5)
     # 0 - 200 Hz
     dR2_random = list(np.random.random(1)*200)
     # random amp logic is that since amp = intensity * lw, lets just randomly
@@ -34,13 +34,13 @@ def gen_pop1(optimizer):
     # 1/4 to 1/50th of mean intensity
     i_noise_random = list(np.mean(optimizer.data.intensity) /
                           (np.random.random(1)*46+4))
-    # larmor / 50-4500 -- rough range of digital res
-    cs_noise_random = list(optimizer.larmor/(np.random.random(1)*4450+50))
+    # larmor / 500-5000 -- rough range of digital res
+    cs_noise_random = list(optimizer.larmor/(np.random.random(1)*4500+500))
     # Every delta_w is 0-0.1 ppm CSP
     dw_random = list(0.1*optimizer.larmor *
                      np.random.random(len(optimizer.residues)))
 
-    return Kd_exp_random + kex_exp_random + dR2_random + amp_scaler_random + \
+    return Kd_exp_random + koff_exp_random + dR2_random + amp_scaler_random + \
         i_noise_random + cs_noise_random + dw_random
 
 
@@ -115,7 +115,7 @@ def run_malice(config):
     # Important variables
     larmor = config.larmor
     gvs = 6
-    lam = 0.015
+    lam = 0.0000002
     nh_scale = 0.2  # Consider reducing to ~0.14
 
     user_data, initial_reference, residues = parse_input(config.input_file)
@@ -134,7 +134,7 @@ def run_malice(config):
     print('\n---  Phase 1: Differential evolution for parameter optimization with L1 regularization  ---\n')
 
     l1_bounds_min = [-1, 0, 0, np.min(user_data.intensity)/10, i_noise_est/10, larmor/4500] + list([0]*len(residues))
-    l1_bounds_max = [4, 5, 200, np.max(user_data.intensity)*200, i_noise_est*10, larmor/5] + list([6*larmor]*len(residues))
+    l1_bounds_max = [4, 5, 200, np.max(user_data.intensity)*200, i_noise_est*10, larmor/250] + list([6*larmor]*len(residues))
     optimizer.set_bounds((l1_bounds_min, l1_bounds_max))
 
     optimizer.l1_model, performance['l1_model_score'] = pygmo_wrapper(optimizer,
