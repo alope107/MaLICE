@@ -115,7 +115,7 @@ def run_malice(config):
     # Important variables
     larmor = config.larmor
     gvs = 6
-    lam = 0.0000002
+    lam = 0.0003
     nh_scale = 0.2  # Consider reducing to ~0.14
 
     user_data, initial_reference, residues = parse_input(config.input_file)
@@ -134,7 +134,7 @@ def run_malice(config):
     print('\n---  Phase 1: Differential evolution for parameter optimization with L1 regularization  ---\n')
 
     l1_bounds_min = [-1, 0, 0, np.min(user_data.intensity)/10, i_noise_est/10, larmor/4500] + list([0]*len(residues))
-    l1_bounds_max = [4, 5, 200, np.max(user_data.intensity)*200, i_noise_est*10, larmor/250] + list([6*larmor]*len(residues))
+    l1_bounds_max = [4, 5, 200, np.max(user_data.intensity)*10, i_noise_est*10, larmor/50] + list([6*larmor]*len(residues))
     optimizer.set_bounds((l1_bounds_min, l1_bounds_max))
 
     optimizer.l1_model, performance['l1_model_score'] = pygmo_wrapper(optimizer,
