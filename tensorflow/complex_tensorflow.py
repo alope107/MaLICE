@@ -20,6 +20,7 @@ import tensorflow as tf
 import tensorflow_probability as tfp
 import keras.backend as K
 
+from malice.seeds import set_base_seed
 
 
 
@@ -58,7 +59,7 @@ def parse_args(args):
 def main():
     args = parse_args(sys.argv[1:])
     #make_output_dir(args.output_dir)
-    #set_base_seed(args.seed)
+    set_base_seed(args.seed)
     run_malice(args)
 
 
