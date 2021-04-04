@@ -13,8 +13,6 @@ import keras.backend as K
 
 
 class kinetics_fit(Layer):
-    def __init__(self):
-        super(kinetics_fit, self).__init__()
     def build(self, input_shape):
         self.Kd_exp = self.add_weight(name='Kd_exp', shape=(1,),
                                       #initializer=Constant(K.log(Kd)/K.log(10.0)),
@@ -26,10 +24,6 @@ class kinetics_fit(Layer):
                                         initializer=RandomUniform(minval=0, maxval=5),
                                         constraint=MinMaxNorm(min_value=0, max_value=5, rate=0.1), 
                                         trainable=True)
-    
-    def get_config(self):
-        cfg = super().get_config()
-        return cfg 
 
     def call(self, inputs):
         visible, titrant = inputs
@@ -55,10 +49,6 @@ class CompLEx_fit(Layer):
         self.init_I = init_I
         self.n_res = len( self.init_I )
         self.larmor = larmor
-
-    def get_config(self):
-        cfg = super().get_config()
-        return cfg 
 
     def build(self,input_shape):
         self.ref_I = self.add_weight(name='ref_I', shape=(self.n_res,),
@@ -117,10 +107,6 @@ class CSP_fit(Layer):
         self.init_N = init_N
         self.init_H = init_H
         self.larmor = larmor
-
-    def get_config(self):
-        cfg = super().get_config()
-        return cfg 
     
     def build(self, input_shape):
         self.ref_N = self.add_weight(shape=(self.n_res,),
@@ -145,10 +131,6 @@ class int_negLogL(Layer):
         super(int_negLogL, self).__init__()
         self.init_I = init_I
     
-    def get_config(self):
-        cfg = super().get_config()
-        return cfg 
-    
     def build(self,input_shape):
         init_I_mean = float(tf.math.reduce_mean( self.init_I ))
         self.I_noise = self.add_weight( shape=(1,),
@@ -165,10 +147,6 @@ class cs_negLogL(Layer):
     def __init__(self, larmor):
         super(cs_negLogL, self).__init__()
         self.larmor = larmor
-    
-    def get_config(self):
-        cfg = super().get_config()
-        return cfg 
     
     def build(self, input_shape):
         self.cs_noise = self.add_weight( shape=(1,), 
