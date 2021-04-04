@@ -143,10 +143,11 @@ def run_malice(config):
     print('Kd = '+format(np.power(10.0,Kd_exp),'.1f'))
     print('koff = '+format(np.power(10.0,koff_exp),'.1f'))
     print('dR2 = '+format(dR2,'.2f'))
+
+    print(f'{[Kd_exp, koff_exp, dR2, amp_scaler, list(deltaw_array)]}')
     print(deltaw_array)
 
-    ## bleh
-    return 0
+    return Kd_exp, koff_exp, dR2, amp_scaler, list(deltaw_array)
 
 
 if __name__ == "__main__":
