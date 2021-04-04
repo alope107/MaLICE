@@ -145,7 +145,6 @@ def run_malice(config):
     print('dR2 = '+format(dR2,'.2f'))
 
     print(f'{[Kd_exp, koff_exp, dR2, amp_scaler, list(deltaw_array)]}')
-    print(deltaw_array)
 
     return Kd_exp, koff_exp, dR2, amp_scaler, list(deltaw_array)
 

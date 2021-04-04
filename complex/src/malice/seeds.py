@@ -1,3 +1,4 @@
+import os
 import random
 
 import numpy as np
@@ -11,6 +12,7 @@ def set_base_seed(seed):
         # Set seed randomly if not explicitly seeded
         seed = random.randint(0, 999999)
     
+    os.environ['PYTHONHASHSEED'] = str(1)
     _base_seed = seed
     np.random.seed(seed)
     pg.set_global_rng_seed(seed)
