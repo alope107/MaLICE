@@ -6,8 +6,13 @@ import scipy.stats as stats
 
 
 # Returns L1 norm of a vector scaled by the given factor.
-def regularization_penalty(lam, vector):
-    return lam * np.linalg.norm(vector, 1)
+def regularization_penalty(lam, vector, kex):
+    #return lam * np.linalg.norm(vector, 1)
+    return lam * np.sum(np.square(vector))
+    truth_array = vector/kex < 2
+    #return lam * np.sum(np.square(vector) * (0.9*truth_array+0.1)) 
+    return lam*( np.sum( truth_array * np.square(vector) ) + 
+                 np.sum( ~truth_array *  np.square(vector-2*kex) ) )
 
 def merged_residue_df(observed_df, reference_df):
     return pd.merge(observed_df, reference_df, on='residue')
@@ -86,9 +91,53 @@ class MaliceOptimizer(object):
         cs_broad = pa*pb*(pa-pb)*np.power(df.dw,3) * (np.square(kex)+(1-3*pa*pb)*np.square(df.dw))/broad_denom
         cshat_ap = pb*df.dw - cs_broad
 
+        ## 210202
+        ## Ultra simple slow exchange code
+        cshat_slow = 0
+        ihat_slow = pa * df.I_ref
+
+        ap_select = df.dw / kex < 2
+        ihat = ap_select*ihat_ap + ~ap_select*ihat_slow
+        cshat = ap_select*cshat_ap + ~ap_select*cshat_slow
+
         #If anything is entering slower exchange, compute a mixture of Abergel-Palmer and Swiss-Connick approximations
-        if any( df.dw/kex > 0.9 ):
+        ## TEMPORARILY DISABLE THE SC CODE
+        #if self.mode != 'lfitter' and any( df.dw/kex >= 2 ):
+            ## At least one peak is past the AP limit for intermediate exchange and slow exchange must be calculated
+            
+        ## Swift-Connick code
+        '''    
+        r2_f = amp_scaler / df.I_ref
+        r2_b = r2_f + dR2
+
+        ## Intensities
+        r2_1 = pa*r2_f + pb*r2_b + pb*np.square(df.dw)*kex/(np.square(pa)*np.square(kex)+np.square(df.dw))
+        r2_2 = pa*r2_f + pb*r2_b + pa*np.square(df.dw)*kex/(np.square(pb)*np.square(kex)+np.square(df.dw))
+
+        I_1 = pa * amp_scaler / r2_1
+        I_2 = pb * amp_scaler / r2_2
+
+        ## Chemical shifts
+        cs_1 = pb*df.dw + pb*df.dw * (pa*pb*np.square(kex) - np.square(df.dw))/(np.square(pa)*np.square(kex) + np.square(df.dw))
+        cs_2 = pb*df.dw - pa*df.dw * (pa*pb*np.square(kex) - np.square(df.dw))/(np.square(pb)*np.square(kex) + np.square(df.dw))
+
+        #ab_select = self.observed_chemical_shift(self.reference['15N_ref'], df['15N'], self.reference['1H_ref'], df['1H']) <= df.dw/2
+        #cshat_sc = ab_select*cs_1 + ~ab_select*cs_2
+        #ihat_sc = ab_select*I_1 + ~ab_select*I_2
+        cshat_sc = cs_1
+        ihat_sc = I_1
+
+        ap_select = df.dw / kex < 2
+        ihat = ap_select*ihat_ap + ~ap_select*ihat_sc
+        cshat = ap_select*cshat_ap + ~ap_select*cshat_sc
+        '''
+
+
+
+
+            #if self.mode != 'lfitter':
             #Compute the fits using the Swiss-Connick approximation
+        '''
             dw_sc = df.dw/2
             pb_sc = np.array([p if p<=0.5 else 1-p for p in pb])
             pa_sc = 1 - pb_sc
@@ -105,13 +154,37 @@ class MaliceOptimizer(object):
             ihat_sc = ihat_sc_f * sc_truth + ihat_sc_r * ~sc_truth
             cshat_sc = cshat_sc_f * sc_truth + cshat_sc_r * ~sc_truth
             
+
+            # Test 201008
+            # New implementation of Swift-Connick approximation that tries to calculate the two peaks during slow exchange,
+            # infers which one based on if the observed CSP is closer to 0 (free) or delta_w (bound)
+
+            cshat_sc_a = pb*df.dw * (1 + (pa*pb*np.square(kex)-np.square(df.dw))/
+                                         (np.square(pa)*np.square(kex)+np.square(df.dw)))
+            cshat_sc_b = pb*df.dw - pa*df.dw*((pa*pb*np.square(kex)-np.square(df.dw))/
+                                          (np.square(pb)*np.square(kex)+np.square(df.dw)))
+            
+            ihat_sc_a = amp_scaler / (pa*amp_scaler/df.I_ref + pb*dR2 + pb*np.square(df.dw)*kex/
+                                                                    (np.square(pa)*np.square(kex)+np.square(df.dw)))
+            ihat_sc_b = amp_scaler / (pa*amp_scaler/df.I_ref + pb*dR2 + pa*np.square(df.dw)*kex/
+                                                                    (np.square(pb)*np.square(kex)+np.square(df.dw)))
+            
+            # Determine if should use a or b form
+            ab_select = self.observed_chemical_shift(self.reference['15N_ref'], df['15N'], self.reference['1H_ref'], df['1H']) <= df.dw/2
+
+            cshat_sc = ab_select*cshat_sc_a + ~ab_select*cshat_sc_b
+            ihat_sc = ab_select*ihat_sc_a + ~ab_select*ihat_sc_b
+
+            
             #Calculate the mixture of AG and SC fits
-            ap_weight = 1 - 1 / (1+ np.exp(-18*(df.dw/kex-1.3)))
+            #ap_weight = 1 - 1 / (1+ np.exp(-18*(df.dw/kex-1.3)))
+            ap_weight = 0
             ihat = ap_weight*ihat_ap + (1-ap_weight)*ihat_sc
             cshat = ap_weight*cshat_ap + (1-ap_weight)*cshat_sc
-        else:
-            ihat = ihat_ap
-            cshat = cshat_ap
+        '''
+        #else:
+        #    ihat = ihat_ap
+        #    cshat = cshat_ap
         
         return cshat, ihat
     
@@ -158,6 +231,9 @@ class MaliceOptimizer(object):
             titrant_vals = np.linspace(np.min(concs.titrant)-0.1*titrant_rng,
                                         np.max(concs.titrant)+0.1*titrant_rng,
                                         1000)
+            # 200731 I think it makes sense to instead just let the titrant levels start at 0 rather than some defined minimum
+            titrant_vals = np.linspace(0, np.max(concs.titrant)+0.1*titrant_rng, 1000)
+            
             visible_vals = titrant_visible_lm.slope*titrant_vals + titrant_visible_lm.intercept
             fitter_input = pd.DataFrame({'titrant': titrant_vals,
                                             'visible': visible_vals})
@@ -242,6 +318,26 @@ class MaliceOptimizer(object):
             print('INVALID CS DISTRIBUTION')
             return 0
 
-        negLL = -1*(logLL_int + logLL_cs - regularization_penalty(self.lam, df.dw))
+        ## QUICK PATCH 210129
+        ## WANT TO SEE HOW THE CALCULATIONS CHANGE IF I DISABLE REGULARIZATION
+        ## FOR SLOW EXCHANGE
+        Kd = np.power(10.0, Kd_exp)
+        koff = np.power(10.0, koff_exp)
+        kon = koff/Kd
+
+        dimer = ((df.visible + df.titrant + Kd) -
+                 np.sqrt(np.power((df.visible + df.titrant + Kd), 2) -
+                 4*df.visible * df.titrant))/2
+        pb = dimer/df.visible
+        pa = 1 - pb
+
+        # Assume 1:1 stoichiometry for now
+        free_titrant = df.titrant - dimer
+        kr = koff
+        kf = free_titrant * kon
+        kex = kr + kf
+        negLL = -1*(logLL_int + logLL_cs - regularization_penalty(self.lam, df.dw, kex))
+        
+        #negLL = -1*(logLL_int + logLL_cs - regularization_penalty(self.lam, df.dw))
 
         return(negLL, )

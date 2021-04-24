@@ -23,7 +23,7 @@ def gen_pop1(optimizer):
     # Will span from 100 nM to 10 mM
     Kd_exp_random = list(np.random.random(1)*5-1)
     # Will span from 1 kHz to 10 Mhz
-    kex_exp_random = list(np.random.random(1)*4+3)
+    koff_exp_random = list(np.random.random(1)*5)
     # 0 - 200 Hz
     dR2_random = list(np.random.random(1)*200)
     # random amp logic is that since amp = intensity * lw, lets just randomly
@@ -34,13 +34,13 @@ def gen_pop1(optimizer):
     # 1/4 to 1/50th of mean intensity
     i_noise_random = list(np.mean(optimizer.data.intensity) /
                           (np.random.random(1)*46+4))
-    # larmor / 50-4500 -- rough range of digital res
-    cs_noise_random = list(optimizer.larmor/(np.random.random(1)*4450+50))
+    # larmor / 500-5000 -- rough range of digital res
+    cs_noise_random = list(optimizer.larmor/(np.random.random(1)*4500+500))
     # Every delta_w is 0-0.1 ppm CSP
     dw_random = list(0.1*optimizer.larmor *
                      np.random.random(len(optimizer.residues)))
 
-    return Kd_exp_random + kex_exp_random + dR2_random + amp_scaler_random + \
+    return Kd_exp_random + koff_exp_random + dR2_random + amp_scaler_random + \
         i_noise_random + cs_noise_random + dw_random
 
 
@@ -115,7 +115,7 @@ def run_malice(config):
     # Important variables
     larmor = config.larmor
     gvs = 6
-    lam = 0.015
+    lam = 0.0003
     nh_scale = 0.2  # Consider reducing to ~0.14
 
     user_data, initial_reference, residues = parse_input(config.input_file)
@@ -133,8 +133,8 @@ def run_malice(config):
     # Stage 1 - parameter optimization with L1 regularization
     print('\n---  Phase 1: Differential evolution for parameter optimization with L1 regularization  ---\n')
 
-    l1_bounds_min = [-1, 1, 0, np.min(user_data.intensity)/10, i_noise_est/10, larmor/4500] + list([0]*len(residues))
-    l1_bounds_max = [4, 7, 200, np.max(user_data.intensity)*200, i_noise_est*10, larmor/5] + list([6*larmor]*len(residues))
+    l1_bounds_min = [-1, 0, 0, np.min(user_data.intensity)/10, i_noise_est/10, larmor/4500] + list([0]*len(residues))
+    l1_bounds_max = [4, 5, 200, np.max(user_data.intensity)*10, i_noise_est*10, larmor/50] + list([6*larmor]*len(residues))
     optimizer.set_bounds((l1_bounds_min, l1_bounds_max))
 
     optimizer.l1_model, performance['l1_model_score'] = pygmo_wrapper(optimizer,
@@ -293,28 +293,111 @@ def run_malice(config):
     print('\tNumber of MCMC walks: '+str(config.mcmc_walks))
 
     optimizer.mode = 'ml_optimization'
-    lower_conf_limits = []
-    upper_conf_limits = []
+    
 
     executor = concurrent.futures.ProcessPoolExecutor(config.num_threads)
     futures = [executor.submit(mcmc.walk, optimizer, config.mcmc_steps, config.confidence, l1_bounds_min, l1_bounds_max, k) for k in range(config.mcmc_walks)]
     concurrent.futures.wait(futures)
 
+    print('Futures finished')
     accepted_steps = []
     for future in futures:
-        accepted_steps += future.result()
+        accepted_steps = accepted_steps + future.result() 
+    print('Accepted steps made')
+    # Sort the MCMC runs by logL
+    #accepted_steps.sort(key=lambda x:optimizer.fitness(x)[0])
+    #accepted_step_logLs = [optimizer.fitness(m)[0] for m in accepted_steps]
+    print('logL values calculated for accepted steps')
+    # Do a fast sorting on the models
+    #sorted_steps = [x for _,x in sorted(zip(accepted_step_logLs, accepted_steps))]
+    sorted_steps = list(accepted_steps)
+    sorted_steps.sort(key=lambda x:x[0])
+    print('Steps sorted')
+    # Temporary output file so I can QC how spread out the logL scores are, may add as a real output
+    #optimizer.mcmc_logL = accepted_stop_logLs
+    fout = open('logL.txt','w')
+    #for logL in accepted_step_logLs:
+    for sorted_step in sorted_steps:
+        fout.write(format(sorted_step[0],'.3f')+'\n')
+    fout.close()
+    print('logL.txt written')
 
-    for i in range(len(optimizer.ml_model)):
-        param = [x[i] for x in accepted_steps]
-        if len(param) > 0:
-            lower_conf_limits.append(min(param))
-            upper_conf_limits.append(max(param))
-        else:
-            lower_conf_limits.append(-1)
-            upper_conf_limits.append(-1)
+    ## QUICK PATCH IN CASE NO STEPS ARE ACCEPTED
+    if len(sorted_steps) == 0:
+        sorted_steps == [(performance['ml_model_score'], optimizer.ml_model)]*100
 
-    optimizer.lower_conf_limits = list(lower_conf_limits)
-    optimizer.upper_conf_limits = list(upper_conf_limits)
+    ## Set up initial lower/upper confidence levels as the ML model
+    confidences = []
+    lower_conf_values = list(optimizer.ml_model)
+    upper_conf_values = list(optimizer.ml_model)
+    for logL, model in sorted_steps:
+        # Since the models are in order of increasing logL, compute the %ile that the model represents, and update the quantiles
+        # as needed for the min/max values
+        delta_logL = logL - performance['ml_model_score']
+        model_conf_level = stats.chi2.cdf( 2*delta_logL, df=len(model))
+        lower_quantile = (1 - model_conf_level)/2
+        upper_quantile = 1 - lower_quantile
+
+        for k in range(len(optimizer.ml_model)):
+            if model[k] < lower_conf_values[k]: lower_conf_values[k] = model[k]
+            if model[k] > upper_conf_values[k]: upper_conf_values[k] = model[k]
+        
+        confidences.append( [lower_quantile] + lower_conf_values )
+        confidences.append( [upper_quantile] + upper_conf_values )
+
+
+    '''
+    ## Generate increments of the confidence interval to estimate confidence values and their matched chi2 densities
+    conf_values = np.linspace(0.001, config.confidence, 990)  # if using default 0.99, will create points on every 0.1%ile
+    #lower_conf_level_sets = []
+    #upper_conf_level_sets = []
+    confidences = []
+    for conf_value in list(conf_values):
+
+        # Identity the set of models with logL <= max_logL + chi2.ppf(conf_level)/2
+        threshold_logL = performance['ml_model_score'] + stats.chi2.ppf(1-conf_value, df=1)/2
+        target_index = np.argmin( np.abs(np.array(accepted_step_logLs) - threshold_logL) )
+        focal_steps = accepted_steps[:target_index+1]
+
+        lower_conf_levels = []
+        upper_conf_levels = []
+        for p in range(len(optimizer.ml_model)):
+            param = [x[p] for x in focal_steps]
+            if len(param) > 0:
+                lower_conf_levels.append(min(param))
+                upper_conf_levels.append(max(param))
+            else:
+                lower_conf_levels.append(optimizer.ml_model[p])
+                upper_conf_levels.append(optimizer.ml_model[p])
+        
+        lower_level = (1-conf_value)/2
+        upper_level = 1 - lower_level
+
+        confidences.append( [lower_level]+lower_conf_levels )
+        confidences.append( [upper_level]+lower_conf_levels )
+        #confidence_df[lower_level] = lower_conf_levels
+        #confidence_df[upper_level] = upper_conf_levels
+
+        #lower_conf_level_sets.append( lower_conf_levels )
+        #upper_conf_level_sets.append( upper_conf_levels )
+    '''
+
+    ## For the time being, let's just have it spit out the confidence_df as a table, and set the optimizer values to
+    ## the 95%ile so that it functions similarly. Will give me a chance to do some quality control checks now...
+    
+    confidence_df = pd.DataFrame( confidences, columns=['conf_level']+list(range(len(optimizer.ml_model))) )
+    confidence_df = confidence_df.sort_values('conf_level')
+    optimizer.confidence_df = confidence_df
+    
+    ## QUICK PATCH IN CASE NO STEPS ARE ACCEPTED
+    if len(confidence_df) == 0:
+        optimizer.lower_conf_limits = list(optimizer.ml_model)
+        optimizer.upper_conf_limits = list(optimizer.ml_model)
+    else:
+        optimizer.lower_conf_limits = list( confidence_df.loc[confidence_df.conf_level.sub(0.025).abs().idxmin(), 
+                                                            confidence_df.columns[1:]] )
+        optimizer.upper_conf_limits = list( confidence_df.loc[confidence_df.conf_level.sub(0.975).abs().idxmin(), 
+                                                            confidence_df.columns[1:]] )
 
     performance['phase4_time'] = time.time() - performance['start_time']
     performance['current_time'] = time.time() - performance['start_time']

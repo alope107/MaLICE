@@ -12,7 +12,7 @@ def parse_args(args):
     parser.add_argument('--confidence',
                         type=float,
                         help='Confidence interval to report for parameter estimates',
-                        default=0.95)
+                        default=0.99)
     parser.add_argument('--larmor',
                         type=float,
                         help="Larmor frequency (MHz) of 1H in the given magnetic field.",

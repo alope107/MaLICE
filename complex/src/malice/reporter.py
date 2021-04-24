@@ -419,155 +419,239 @@ def CompLEx_Report(optimizer, config, performance, lam, image_dir):
     
     
     
-    i = 0
-    for residue in optimizer.residues:
-        if i%3 == 0:    
-            pdf.add_page()
-            pdf.ln(0.1)
-        pdf.set_font(fixed_width,'B',12)
-        pdf.cell(3, 12/72, txt='Residue '+str(residue), ln=1, align='L')
-        
-        residue_data = optimizer.data.loc[optimizer.data.residue == residue,['15N','1H']]
-        residue_ref = optimizer.reference[optimizer.reference.residue == residue]
-        
-        residue_fits = fit_points.copy()[fit_points.residue == residue]
-        residue_regression = regression[regression.residue == residue]
-
-        residue_lower_csp_regression = lower_cl_csp_regression[lower_cl_csp_regression.residue == residue]
-        residue_lower_int_regression = lower_cl_int_regression[lower_cl_int_regression.residue == residue]
-        residue_upper_csp_regression = upper_cl_csp_regression[upper_cl_csp_regression.residue == residue]
-        residue_upper_int_regression = upper_cl_int_regression[upper_cl_int_regression.residue == residue]
-        
-        
-        # Add the regression lines for both the intensity and csp fits
-        titrant_rng = fit_points.titrant.max()-fit_points.titrant.min()
-        xl = [np.min(fit_points.titrant)-0.05*titrant_rng, np.max(fit_points.titrant)+0.05*titrant_rng]  
-        csp_rng = np.max(fit_points.csp)-np.min(fit_points.csp)
-        yl_csp = [np.min(fit_points.csp)-0.08*csp_rng, np.max(fit_points.csp)+0.08*csp_rng]
-        int_rng = np.max(fit_points.intensity)-np.min(fit_points.intensity)
-        yl_int = [np.min(fit_points.intensity)-0.08*int_rng, np.max(fit_points.intensity)+0.08*int_rng]
-        
-        
-        yaxes = [yl_csp, yl_int]
-        ylabels = ['CSP (ppm)', 'Intensity']
-        points = ['csp', 'intensity']
-        lines = ['csfit', 'ifit']
-        residue_lower_conf_data = [residue_lower_csp_regression, residue_lower_int_regression]
-        residue_upper_conf_data = [residue_upper_csp_regression, residue_upper_int_regression]
-        errors = [optimizer.ml_model[5]/optimizer.larmor, optimizer.ml_model[4]]
-        file_names = ['cs_regression_residue_', 'intensity_regression_residue_']
-
-        conf_draw_flag_cs = 0
-        conf_draw_flag_int = 0
-
-        fig, ax = plt.subplots(nrows=2, figsize=(2.5,3.1))
-        color_index = [plasma_titrant[titrant_concs.index(x)] for x in residue_fits.titrant]
-        for i in range(2):
-            #ax[i].scatter('tit', points[i], data=residue_fits, color='black', s=10, zorder=3)
-            ax[i].scatter('titrant', points[i], data=residue_fits, c=color_index, s=32, linewidths=1, edgecolors='black', zorder=5)
-            ax[i].errorbar('titrant', points[i], data=residue_fits, yerr=errors[i], color='black', fmt='none', s=16, zorder=4)
-            ax[i].plot('titrant', lines[i], data=residue_regression, color='black', zorder=3)
-            # Draw confidence intervals if they are consistently above/below the regression line
-            if np.all(residue_regression[lines[i]] >= residue_lower_conf_data[i][lines[i]]) and np.all(residue_regression[lines[i]] <= residue_upper_conf_data[i][lines[i]]):
-                ax[i].plot('titrant',lines[i], data=residue_lower_conf_data[i], color='black', linestyle='dotted', zorder=2)
-                ax[i].plot('titrant',lines[i], data=residue_upper_conf_data[i], color='black', linestyle='dotted', zorder=2)
-                ax[i].fill_between(residue_lower_conf_data[i].titrant, residue_lower_conf_data[i][lines[i]], residue_upper_conf_data[i][lines[i]], color=[cm.Greys_r(0.7)], zorder=1)
-            else:
-                # Make an output warning of potentially slow exchange
-                ## TO DO: ADD CODE TO ACTUALLY OUTPUT THIS SOMEWHERE IN THE REPORT
-                if i == 0:  conf_draw_flag_cs = 1
-                else:   conf_draw_flag_int = 1
-            ax[i].set(xlim=xl, ylim=yaxes[i])
-            ax[i].set_xlabel('Titrant (μM)', fontsize=8)
-            ax[i].set_ylabel(ylabels[i], fontsize=8)
-            ax[i].yaxis.offsetText.set_fontsize(7)
-            ax[i].tick_params(labelsize=7)
+    page_slot = 0
+    missing_residues = []
+    residue_range = list(range(int(np.min(optimizer.residues)),int(np.max(optimizer.residues)+1)))
+    for residue in residue_range:
+        if residue not in optimizer.residues:
+            missing_residues.append(residue)
+        else:
             
-            # Calculate R^2
-            #R2 = (np.var(residue_fits[points[i]]) - np.var(residue_fits[points[i]]-residue_fits[lines[i]]))/np.var(residue_fits[points[i]])
-            #ss_total = np.sum( np.square( residue_fits[points[i]] - np.mean(residue_fits[points[i]]) ) )
-            #ss_residual = np.sum( np.square(residue_fits[points[i]]-residue_fits[lines[i]]) )
-            #R2 = 1 - ss_residual/ss_total
-            slope, intercept, r_value, p_value, std_err = stats.linregress(residue_fits[points[i]],residue_fits[lines[i]])
-            if i == 0:
-                ax[i].text(xl[0]+0.05*(xl[1]-xl[0]), yaxes[i][1]-0.15*(yaxes[i][1]-yaxes[i][0]), 'r = '+format(r_value,'.2f'),fontsize=7)
-            else:
-                ax[i].text(xl[0]+0.75*(xl[1]-xl[0]), yaxes[i][1]-0.15*(yaxes[i][1]-yaxes[i][0]), 'r = '+format(r_value,'.2f'),fontsize=7)
-        fig.tight_layout(pad=0.3,h_pad=0.1)
-        #fig_path = os.path.join(image_dir,file_names[i]+str(residue)+'.png')
-        fig_path = os.path.join(image_dir,'regression_lines_residue_'+str(residue)+'.png')
-        fig.savefig(fig_path, dpi=300)
-        plt.close(fig)
-            
-        pdf.image(fig_path, x=pdf.get_x(), y=pdf.get_y(), w=2.5, h=3.1)
+            # If missing residues present, print them out in a new block
+            if len(missing_residues) > 0:
 
-        # Add the simulated spectrum figure
-        figure_name = generate_sim_spectrum(optimizer, 
-                                            regression_at_titrant_concs, 
-                                            optimizer.larmor, 
-                                            residue,
-                                            #theta_est,
-                                            #theta_p_value,
-                                            titrant_concs,
-                                            plasma_titrant,
-                                            cividis_titrant, 
-                                            image_dir)
-        pdf.image(os.path.join(image_dir,figure_name), x = pdf.get_x()+2.5, y=pdf.get_y(),
-              w = 3.1, h = 3.1)
-        
-        
-        ## Add relevant text detailing fits of each residue
-        pdf.ln(0.2)
-        pdf.set_x(pdf.get_x()+5.7)
-        pdf.set_font(fixed_width,'I',8)
-        pdf.cell(1.5, 8/72, txt = '# of observed titration points:', ln=0, align='L')
-        pdf.set_font(fixed_width,'B',8)
-        pdf.cell(0.2, 8/72, txt = str(len(residue_fits)), ln=1, align='R')
-        pdf.ln(10/72)
-        
-        res_data = optimizer.data.copy()[optimizer.data.residue == residue]
-        original_ref = res_data[res_data.titrant == np.min(res_data.titrant)]
-        current_ref = optimizer.reference.loc[optimizer.reference.residue == residue]
-        reference_text = ( ('15N (ppm)', format(float(current_ref['15N_ref']),'.3f'),
-                            format(float(original_ref['15N'])-float(current_ref['15N_ref']),'.3f')),
-                           ('1H (ppm)', format(float(current_ref['1H_ref']),'.3f'),
-                            format(float(original_ref['1H'])-float(current_ref['1H_ref']),'.3f')),
-                           ('Intensity', format(float(current_ref['I_ref']),'.2g'),
-                            format(float(original_ref['intensity'])-float(current_ref['I_ref']),'.2g')) )
-        
-        pdf.set_x(pdf.get_x()+5.7)
-        pdf.set_font(fixed_width,'I',9)
-        pdf.cell(2.8, 10/72, txt = 'Reference peak:', ln=1, align='L')
-        for name, value, change in reference_text:
+                # Check to see if a new page needs to be added
+                if page_slot%3 == 0:    
+                    pdf.add_page()
+                    pdf.ln(0.1)
+                
+                pdf.ln(1.5)
+                pdf.set_font(fixed_width,'B',12)
+                if len(missing_residues) == 1:
+                    pdf.cell(7,12/72, txt='No data provided for residue '+str(missing_residues[0]), ln=0, align='C')
+                else:
+                    pdf.cell(7,12/72, txt='No data provided for residues '+str(missing_residues[0])+'-'+str(missing_residues[-1]), 
+                             ln=0, align='C')
+                
+                pdf.ln(1.6)
+                missing_residues = []
+                page_slot += 1
+            
+            # Check again if new page needs to be added after missing residues have been dealt with
+            if page_slot%3 == 0:    
+                pdf.add_page()
+                pdf.ln(0.1)
+
+            pdf.set_font(fixed_width,'B',12)
+            pdf.cell(3, 12/72, txt='Residue '+str(residue), ln=1, align='L')
+            
+            residue_data = optimizer.data.loc[optimizer.data.residue == residue,['15N','1H']]
+            residue_ref = optimizer.reference[optimizer.reference.residue == residue]
+            
+            residue_fits = fit_points.copy()[fit_points.residue == residue]
+            residue_regression = regression[regression.residue == residue]
+
+            residue_lower_csp_regression = lower_cl_csp_regression[lower_cl_csp_regression.residue == residue]
+            residue_lower_int_regression = lower_cl_int_regression[lower_cl_int_regression.residue == residue]
+            residue_upper_csp_regression = upper_cl_csp_regression[upper_cl_csp_regression.residue == residue]
+            residue_upper_int_regression = upper_cl_int_regression[upper_cl_int_regression.residue == residue]
+            
+            
+            # Add the regression lines for both the intensity and csp fits
+            titrant_rng = fit_points.titrant.max()-fit_points.titrant.min()
+            xl = [np.min(fit_points.titrant)-0.05*titrant_rng, np.max(fit_points.titrant)+0.05*titrant_rng]  
+            csp_rng = np.max(fit_points.csp)-np.min(fit_points.csp)
+            yl_csp = [np.min(fit_points.csp)-0.08*csp_rng, np.max(fit_points.csp)+0.08*csp_rng]
+            int_rng = np.max(fit_points.intensity)-np.min(fit_points.intensity)
+            yl_int = [np.min(fit_points.intensity)-0.08*int_rng, np.max(fit_points.intensity)+0.08*int_rng]
+            
+            
+            yaxes = [yl_csp, yl_int]
+            ylabels = ['CSP (ppm)', 'Intensity']
+            points = ['csp', 'intensity']
+            lines = ['csfit', 'ifit']
+            residue_lower_conf_data = [residue_lower_csp_regression, residue_lower_int_regression]
+            residue_upper_conf_data = [residue_upper_csp_regression, residue_upper_int_regression]
+            errors = [optimizer.ml_model[5]/optimizer.larmor, optimizer.ml_model[4]]
+            file_names = ['cs_regression_residue_', 'intensity_regression_residue_']
+
+            conf_draw_flag_cs = 0
+            conf_draw_flag_int = 0
+
+            fig, ax = plt.subplots(nrows=2, figsize=(2.5,3.1))
+            color_index = [plasma_titrant[titrant_concs.index(x)] for x in residue_fits.titrant]
+            for i in range(2):
+                #ax[i].scatter('tit', points[i], data=residue_fits, color='black', s=10, zorder=3)
+                ax[i].scatter('titrant', points[i], data=residue_fits, c=color_index, s=32, linewidths=1, edgecolors='black', zorder=5)
+                ax[i].errorbar('titrant', points[i], data=residue_fits, yerr=errors[i], color='black', fmt='none', s=16, zorder=4)
+                ax[i].plot('titrant', lines[i], data=residue_regression, color='black', zorder=3)
+                # Draw confidence intervals if they are consistently above/below the regression line
+                if np.all(residue_regression[lines[i]] >= residue_lower_conf_data[i][lines[i]]) and np.all(residue_regression[lines[i]] <= residue_upper_conf_data[i][lines[i]]):
+                    ax[i].plot('titrant',lines[i], data=residue_lower_conf_data[i], color='black', linestyle='dotted', zorder=2)
+                    ax[i].plot('titrant',lines[i], data=residue_upper_conf_data[i], color='black', linestyle='dotted', zorder=2)
+                    ax[i].fill_between(residue_lower_conf_data[i].titrant, residue_lower_conf_data[i][lines[i]], residue_upper_conf_data[i][lines[i]], color=[cm.Greys_r(0.7)], zorder=1)
+                else:
+                    # Make an output warning of potentially slow exchange
+                    ## TO DO: ADD CODE TO ACTUALLY OUTPUT THIS SOMEWHERE IN THE REPORT
+                    if i == 0:  conf_draw_flag_cs = 1
+                    else:   conf_draw_flag_int = 1
+                ax[i].set(xlim=xl, ylim=yaxes[i])
+                ax[i].set_xlabel('Titrant (μM)', fontsize=8)
+                ax[i].set_ylabel(ylabels[i], fontsize=8)
+                ax[i].yaxis.offsetText.set_fontsize(7)
+                ax[i].tick_params(labelsize=7)
+                
+                # Calculate R^2
+                #R2 = (np.var(residue_fits[points[i]]) - np.var(residue_fits[points[i]]-residue_fits[lines[i]]))/np.var(residue_fits[points[i]])
+                #ss_total = np.sum( np.square( residue_fits[points[i]] - np.mean(residue_fits[points[i]]) ) )
+                #ss_residual = np.sum( np.square(residue_fits[points[i]]-residue_fits[lines[i]]) )
+                #R2 = 1 - ss_residual/ss_total
+                slope, intercept, r_value, p_value, std_err = stats.linregress(residue_fits[points[i]],residue_fits[lines[i]])
+                if i == 0:
+                    csp_r = r_value
+                    ax[i].text(xl[0]+0.05*(xl[1]-xl[0]), yaxes[i][1]-0.15*(yaxes[i][1]-yaxes[i][0]), 'r = '+format(csp_r,'.2f'),fontsize=7)
+                else:
+                    int_r = r_value
+                    ax[i].text(xl[0]+0.75*(xl[1]-xl[0]), yaxes[i][1]-0.15*(yaxes[i][1]-yaxes[i][0]), 'r = '+format(int_r,'.2f'),fontsize=7)
+            fig.tight_layout(pad=0.3,h_pad=0.1)
+            #fig_path = os.path.join(image_dir,file_names[i]+str(residue)+'.png')
+            fig_path = os.path.join(image_dir,'regression_lines_residue_'+str(residue)+'.png')
+            fig.savefig(fig_path, dpi=300)
+            plt.close(fig)
+                
+            pdf.image(fig_path, x=pdf.get_x(), y=pdf.get_y(), w=2.5, h=3.1)
+
+            # Add the simulated spectrum figure
+            figure_name = generate_sim_spectrum(optimizer, 
+                                                regression_at_titrant_concs, 
+                                                optimizer.larmor, 
+                                                residue,
+                                                #theta_est,
+                                                #theta_p_value,
+                                                titrant_concs,
+                                                plasma_titrant,
+                                                cividis_titrant, 
+                                                image_dir)
+            pdf.image(os.path.join(image_dir,figure_name), x = pdf.get_x()+2.5, y=pdf.get_y(),
+                w = 3.1, h = 3.1)
+            
+            
+            ## Add relevant text detailing fits of each residue
+            pdf.ln(0.2)
             pdf.set_x(pdf.get_x()+5.7)
-            pdf.set_font(fixed_width,'I',7)
-            pdf.cell(0.55, 7/72, txt = '    '+name, ln=0, align='L')
-            pdf.set_font(fixed_width,'B',7)
-            pdf.cell(0.6, 7/72, txt = value, ln=0, align='R')
-            if np.sign(float(change)) > 0: sign = '+'
-            else:   sign = ''
-            pdf.cell(0.65, 7/72, txt = '('+sign+change+')', ln=1, align='R')
-        pdf.ln(10/72)
-        
-        
-        
-        pdf.set_x(pdf.get_x()+5.7+0.34+0.47)
-        pdf.set_font(fixed_width,'I',8)
-        pdf.cell(0.47, 9/72, txt = format(alpha_l,'.1%')+' CL', ln=0, align='C')
-        pdf.cell(0.47, 9/72, txt = format(alpha_u,'.1%')+' CL', ln=1, align='C')
-        pdf.set_x(pdf.get_x()+5.7)
-        pdf.cell(0.34, 9/72, txt = 'Δω (Hz):', ln=0, align='L')
-        pdf.set_font(fixed_width,'B',8)
-        pdf.cell(0.47, 9/72, txt = format(float(residue_dw_df.loc[residue_dw_df.residue == residue, 'dw']),'.1f'), ln=0, align='R')
-        pdf.cell(0.47, 9/72, txt = format(float(residue_dw_df.loc[residue_dw_df.residue == residue, 'lower']),'.1f'), ln=0, align='C')
-        pdf.cell(0.47, 9/72, txt = format(float(residue_dw_df.loc[residue_dw_df.residue == residue, 'upper']),'.1f'), ln=1, align='C')
-        
-        pdf.ln(1.8)
+            pdf.set_font(fixed_width,'I',8)
+            pdf.cell(1.5, 8/72, txt = '# of observed titration points:', ln=0, align='L')
+            pdf.set_font(fixed_width,'B',8)
+            pdf.cell(0.2, 8/72, txt = str(len(residue_fits)), ln=1, align='R')
+            pdf.ln(10/72)
             
-        i+=1
+            res_data = optimizer.data.copy()[optimizer.data.residue == residue]
+            original_ref = res_data[res_data.titrant == np.min(res_data.titrant)]
+            current_ref = optimizer.reference.loc[optimizer.reference.residue == residue]
+            reference_text = ( ('15N (ppm)', format(float(current_ref['15N_ref']),'.3f'),
+                                format(float(original_ref['15N'])-float(current_ref['15N_ref']),'.3f')),
+                            ('1H (ppm)', format(float(current_ref['1H_ref']),'.3f'),
+                                format(float(original_ref['1H'])-float(current_ref['1H_ref']),'.3f')),
+                            ('Intensity', format(float(current_ref['I_ref']),'.2g'),
+                                format(float(original_ref['intensity'])-float(current_ref['I_ref']),'.2g')) )
+            
+            pdf.set_x(pdf.get_x()+5.7)
+            pdf.set_font(fixed_width,'I',9)
+            pdf.cell(2.8, 10/72, txt = 'Reference peak:', ln=1, align='L')
+            for name, value, change in reference_text:
+                pdf.set_x(pdf.get_x()+5.7)
+                pdf.set_font(fixed_width,'I',7)
+                pdf.cell(0.55, 7/72, txt = '    '+name, ln=0, align='L')
+                pdf.set_font(fixed_width,'B',7)
+                pdf.cell(0.6, 7/72, txt = value, ln=0, align='R')
+                if np.sign(float(change)) > 0: sign = '+'
+                else:   sign = ''
+                pdf.cell(0.65, 7/72, txt = '('+sign+change+')', ln=1, align='R')
+            pdf.ln(10/72)
+            
+            
+            
+            pdf.set_x(pdf.get_x()+5.7+0.34+0.47)
+            pdf.set_font(fixed_width,'I',8)
+            pdf.cell(0.47, 9/72, txt = format(alpha_l,'.1%')+' CL', ln=0, align='C')
+            pdf.cell(0.47, 9/72, txt = format(alpha_u,'.1%')+' CL', ln=1, align='C')
+            pdf.set_x(pdf.get_x()+5.7)
+            pdf.cell(0.34, 9/72, txt = 'Δω (Hz):', ln=0, align='L')
+            pdf.set_font(fixed_width,'B',8)
+            pdf.cell(0.47, 9/72, txt = format(float(residue_dw_df.loc[residue_dw_df.residue == residue, 'dw']),'.1f'), ln=0, align='R')
+            pdf.cell(0.47, 9/72, txt = format(float(residue_dw_df.loc[residue_dw_df.residue == residue, 'lower']),'.1f'), ln=0, align='C')
+            pdf.cell(0.47, 9/72, txt = format(float(residue_dw_df.loc[residue_dw_df.residue == residue, 'upper']),'.1f'), ln=1, align='C')
+            
+            #pdf.ln(1.8)
+            ## Add text for any notes
+
+            focal_dw = float(residue_dw_df.loc[residue_dw_df.residue == residue, 'dw'])/optimizer.larmor
+            focal_theta = float(optimizer.deltaw_df.estimated_theta[optimizer.deltaw_df.residue == residue])
+            focal_theta_p = float(optimizer.deltaw_df.corrected_theta_p_value[optimizer.deltaw_df.residue == residue])
+            
+            pdf.set_font(fixed_width,'',6)
+            note_lines = 0
+            pdf.ln(0.2)
+            if focal_dw >= 0.05:
+                pdf.set_x(pdf.get_x()+5.7)
+                pdf.cell(1.7, 9/72, txt='- Δω > 0.05 ppm (drawn as dashed line)', ln=1, align='L')
+                note_lines +=1
+            
+                if focal_theta_p < 0.05:
+                    pdf.set_x(pdf.get_x()+5.7)
+                    pdf.cell(1.7, 9/72, txt='- CSP trajectory detected (p = '+format(focal_theta_p,'.2g')+'):', 
+                            ln=1, align='L')
+                    pdf.set_x(pdf.get_x()+5.7)
+                    pdf.cell(1.7, 9/72, txt='         15N: '+format(float(current_ref['15N_ref'])+focal_dw*np.sin(focal_theta)/optimizer.nh_scale, '.3f')+
+                                            '      1H: '+format(float(current_ref['1H_ref'])+focal_dw*np.cos(focal_theta), '.3f'), ln=1, align='L')
+                    note_lines +=2
+            
+            pdf.ln(9/72)
+
+            # Quality control measures
+            if len(residue_fits) == 1:
+                pdf.set_x(pdf.get_x()+5.7)
+                pdf.cell(1.7, 9/72, txt='- Only single titrant concentration supplied', ln=1, align='L')
+                note_lines +=1
+            if np.abs(csp_r) < 0.4:
+                pdf.set_x(pdf.get_x()+5.7)
+                pdf.cell(1.7, 9/72, txt='- Low CSP coef. of determination (|r| < 0.4)', ln=1, align='L')
+                note_lines +=1
+            if np.abs(int_r) < 0.4:
+                pdf.set_x(pdf.get_x()+5.7)
+                pdf.cell(1.7, 9/72, txt='- Low intensity coef. of determination (|r| < 0.4)', ln=1, align='L')
+                note_lines +=1
+            if conf_draw_flag_cs == 1:
+                pdf.set_x(pdf.get_x()+5.7)
+                pdf.cell(1.7, 9/72, txt='- Intersecting CSP conf. intervals (not drawn)', ln=1, align='L')
+                note_lines +=1
+            if conf_draw_flag_int == 1:
+                pdf.set_x(pdf.get_x()+5.7)
+                pdf.cell(1.7, 9/72, txt='- Intersecting intensity conf. intervals (not drawn)', ln=1, align='L')
+                note_lines +=1
+            pdf.ln(1.6 - 9/72*(note_lines+1))
+
+            page_slot+=1
 
 
-    '''
+    ## Add the modeling information at the end -- I believe it should fit into one block
+
+    ## Add new page if there's not room on the current
+    if page_slot%3 == 0:
+        pdf.add_page()
+        pdf.ln(0.1)
+
+    pdf.ln(0.2) 
     init_x, init_y = pdf.get_x(), pdf.get_y()
     
     fixed_params_text = [('# of global variables', optimizer.gvs, 0),
@@ -582,31 +666,6 @@ def CompLEx_Report(optimizer, config, performance, lam, image_dir):
         pdf.cell(0.5, 10/72, txt=str(round(var,round_digits)), ln=1, align='R')
     
     pdf.ln(0.2)
-    
-    opt_params_text = [('L1 λ', format(lam, '.3f')),
-                       ('Phase 1 islands', config.phase1_islands),
-                       ('Phase 1 generations', config.phase1_generations),
-                       ('Phase 1 rounds of evolution', config.phase1_evo_rounds),
-                       ('Phase 2 islands', config.phase2_islands),
-                       ('Phase 2 generations', config.phase2_generations),
-                       ('Phase 2 rounds of evolution', config.phase2_evo_rounds),
-                       ('Population size', config.pop_size),
-                       ('MCMC walks', config.mcmc_walks),
-                       ('MCMC steps', config.mcmc_steps),
-                       ('Founder seed', get_base_seed()),
-                       ('PyGMO tolerance', format(config.tolerance, '.1g')),
-                       ('Least squares max iterations', format(config.least_squares_max_iter,'.1g'))]
-    pdf.set_font(fixed_width,'BI',12)
-    pdf.cell(3,14/72,txt='Optimization settings:',ln=1,border=0,align='L')
-    for name, var in opt_params_text:
-        pdf.set_font(fixed_width,'I',10)
-        pdf.cell(2.2, 10/72, txt='    '+name+':', ln=0)
-        pdf.set_font(fixed_width,'B',10)
-        pdf.cell(0.5, 10/72, txt=str(var), ln=1, align='R')
-    
-    
-    curr_x = init_x + 3.1
-    pdf.set_xy(curr_x, init_y)
     
     ## Insert model performance results here
     pdf.set_font(fixed_width,'BI',12)
@@ -625,20 +684,33 @@ def CompLEx_Report(optimizer, config, performance, lam, image_dir):
     
     for name, var in performance_text:
         pdf.set_font(fixed_width,'I',10)
-        pdf.set_x(curr_x)
         pdf.cell(2.5, 10/72, txt='    '+name+':', ln=0)
         pdf.set_font(fixed_width,'B',10)
         pdf.cell(0.5, 10/72, txt=var, ln=1, align='R')
+
+    curr_x = init_x + 3.5
+    pdf.set_xy(curr_x, init_y)
     
-    pdf.ln(0.1)
-    '''
-    
-    
-
-
-
-
-
-
+    opt_params_text = [('L1 λ', format(lam, '.3f')),
+                       ('Phase 1 islands', config.phase1_islands),
+                       ('Phase 1 generations', config.phase1_generations),
+                       ('Phase 1 rounds of evolution', config.phase1_evo_rounds),
+                       ('Phase 2 islands', config.phase2_islands),
+                       ('Phase 2 generations', config.phase2_generations),
+                       ('Phase 2 rounds of evolution', config.phase2_evo_rounds),
+                       ('Population size', config.pop_size),
+                       ('MCMC walks', config.mcmc_walks),
+                       ('MCMC steps', config.mcmc_steps),
+                       ('Founder seed', get_base_seed()),
+                       ('PyGMO tolerance', format(config.tolerance, '.1g')),
+                       ('Least squares max iterations', format(config.least_squares_max_iter,'.1g'))]
+    pdf.set_font(fixed_width,'BI',12)
+    pdf.cell(3,14/72,txt='Optimization settings:',ln=1,border=0,align='L')
+    for name, var in opt_params_text:
+        pdf.set_x(curr_x)
+        pdf.set_font(fixed_width,'I',10)
+        pdf.cell(2.2, 10/72, txt='    '+name+':', ln=0)
+        pdf.set_font(fixed_width,'B',10)
+        pdf.cell(0.5, 10/72, txt=str(var), ln=1, align='R')
 
     return pdf

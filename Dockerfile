@@ -13,4 +13,5 @@ ENV PYTHONPATH=/app/src
 COPY complex /app
 WORKDIR /app
 
-CMD ["pytest"]
+# Temporarily disable tests
+#CMD ["pytest"]
