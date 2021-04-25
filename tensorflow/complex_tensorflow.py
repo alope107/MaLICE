@@ -1,24 +1,15 @@
 ## CompLEx Tensorflow implementation
-
-
-## Libraries
 import sys, argparse
 import numpy as np, pandas as pd
-import scipy.stats as stats
-import matplotlib.pyplot as plt
 
 from layers import *
 
-import keras
 from keras.layers import Input, Layer, Add
 from keras.models import Model
-from keras.initializers import VarianceScaling, RandomUniform, RandomNormal, Constant
+from keras.initializers import RandomUniform, RandomNormal, Constant
 from keras.constraints import MinMaxNorm
-from keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
-from keras.optimizers import Adam, Adamax
-import tensorflow as tf
-import tensorflow_probability as tfp
-import keras.backend as K
+from keras.callbacks import ReduceLROnPlateau
+from keras.optimizers import Adam
 
 from malice.seeds import set_base_seed
 
@@ -41,10 +32,6 @@ def parse_args(args):
                         type=int,
                         help='random seed (still not deterministic if using multiple threads)',
                         default=None)
-    parser.add_argument('--tolerance',
-                        type=float,
-                        help='PyGMO tolerance for both ftol and xtol',
-                        default='1e-8')
     parser.add_argument('--visible',
                         type=str,
                         help='Name of the NMR visible protein',
