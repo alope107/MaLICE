@@ -2,5 +2,7 @@
 name: 'Run Tests'
 description: 'Runs tests via the dockerfie'
 runs:
+  env:
+     DOCKER_BUILDKIT: 1
   using: 'docker'
   image: '../../../Dockerfile'
