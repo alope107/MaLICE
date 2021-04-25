@@ -1,24 +1,15 @@
 ## CompLEx Tensorflow implementation
-
-
-## Libraries
 import sys, argparse
 import numpy as np, pandas as pd
-import scipy.stats as stats
-import matplotlib.pyplot as plt
 
 from layers import *
 
-import keras
 from keras.layers import Input, Layer, Add
 from keras.models import Model
-from keras.initializers import VarianceScaling, RandomUniform, RandomNormal, Constant
+from keras.initializers import RandomUniform, RandomNormal, Constant
 from keras.constraints import MinMaxNorm
-from keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
-from keras.optimizers import Adam, Adamax
-import tensorflow as tf
-import tensorflow_probability as tfp
-import keras.backend as K
+from keras.callbacks import ReduceLROnPlateau
+from keras.optimizers import Adam
 
 from malice.seeds import set_base_seed
 
@@ -41,10 +32,6 @@ def parse_args(args):
                         type=int,
                         help='random seed (still not deterministic if using multiple threads)',
                         default=None)
-    parser.add_argument('--tolerance',
-                        type=float,
-                        help='PyGMO tolerance for both ftol and xtol',
-                        default='1e-8')
     parser.add_argument('--visible',
                         type=str,
                         help='Name of the NMR visible protein',
@@ -115,13 +102,13 @@ def run_malice(config):
     Int_input = Input(shape=(1,), name='intensity')
     residue_input = Input(shape=(104,), name='residue_array')
 
-    pb, kex = kinetics_fit()([visible_input, titrant_input])
-    ihat,cshat = CompLEx_fit(initials['intensity'], larmor)([residue_input,visible_input,pb,kex])
+    pb, kex = KineticsFit()([visible_input, titrant_input])
+    ihat,cshat = ComplexFit(initials['intensity'], larmor)([residue_input,visible_input,pb,kex])
 
-    csobs = CSP_fit(initials['15N'],initials['1H'], larmor)([residue_input,N15_input,H1_input])
+    csobs = CspFit(initials['15N'],initials['1H'], larmor)([residue_input,N15_input,H1_input])
 
-    int_loss = int_negLogL(initials['intensity'])([Int_input,ihat])
-    cs_loss = cs_negLogL(larmor)([csobs,cshat])
+    int_loss = IntNegLogL(initials['intensity'])([Int_input,ihat])
+    cs_loss = CsNegLogL(larmor)([csobs,cshat])
 
     summed_loss = Add()([int_loss,cs_loss])
 

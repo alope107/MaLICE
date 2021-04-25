@@ -1,18 +1,11 @@
-
-import keras
-from keras.layers import Input, Layer, Add
-from keras.models import Model
-from keras.initializers import VarianceScaling, RandomUniform, RandomNormal, Constant
+from keras.layers import Layer
+from keras.initializers import RandomUniform, RandomNormal, Constant
 from keras.constraints import MinMaxNorm
-from keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
-from keras.optimizers import Adam, Adamax
-import tensorflow as tf
-import tensorflow_probability as tfp
 import keras.backend as K
+import tensorflow_probability as tfp
+import tensorflow as tf
 
-
-
-class kinetics_fit(Layer):
+class KineticsFit(Layer):
     def build(self, input_shape):
         self.Kd_exp = self.add_weight(name='Kd_exp', shape=(1,),
                                       #initializer=Constant(K.log(Kd)/K.log(10.0)),
@@ -43,9 +36,9 @@ class kinetics_fit(Layer):
         return pb, kex
 
 
-class CompLEx_fit(Layer):
+class ComplexFit(Layer):
     def __init__(self, init_I, larmor):
-        super(CompLEx_fit, self).__init__()
+        super().__init__()
         self.init_I = init_I
         self.n_res = len( self.init_I )
         self.larmor = larmor
@@ -100,9 +93,9 @@ class CompLEx_fit(Layer):
         
 
 
-class CSP_fit(Layer):
+class CspFit(Layer):
     def __init__(self, init_N, init_H, larmor):
-        super(CSP_fit, self).__init__()
+        super().__init__()
         self.n_res = len( init_N )
         self.init_N = init_N
         self.init_H = init_H
@@ -126,9 +119,9 @@ class CSP_fit(Layer):
         return csp
     
     
-class int_negLogL(Layer):
+class IntNegLogL(Layer):
     def __init__(self, init_I):
-        super(int_negLogL, self).__init__()
+        super().__init__()
         self.init_I = init_I
     
     def build(self,input_shape):
@@ -143,9 +136,9 @@ class int_negLogL(Layer):
         dist = tfp.distributions.Normal(loc=y_pred, scale=self.I_noise)
         return -1*dist.log_prob(y_true)
 
-class cs_negLogL(Layer):
+class CsNegLogL(Layer):
     def __init__(self, larmor):
-        super(cs_negLogL, self).__init__()
+        super().__init__()
         self.larmor = larmor
     
     def build(self, input_shape):

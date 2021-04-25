@@ -1,5 +1,6 @@
 from io import StringIO
 from unittest import TestCase
+import unittest
 
 import pandas as pd
 from pandas.testing import assert_series_equal, assert_frame_equal
@@ -48,8 +49,9 @@ def _prefit_refpeaks():
     return np.array([124.57 , 126.76, 121.13, 7.76, 8.35, 8.20,
                      3406563.67, 4993584.45, 2168720.03])
 
+@unittest.skip("Skipping during switchover to TF")
 class TestOptimizer(TestCase):
-
+    
     def test_set_bounds(self):
         optimizer = _test_object()
         bounds = ([1, 2, 3], [4, 5, 6])
