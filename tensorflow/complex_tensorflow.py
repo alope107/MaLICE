@@ -115,13 +115,13 @@ def run_malice(config):
     Int_input = Input(shape=(1,), name='intensity')
     residue_input = Input(shape=(104,), name='residue_array')
 
-    pb, kex = kinetics_fit()([visible_input, titrant_input])
-    ihat,cshat = CompLEx_fit(initials['intensity'], larmor)([residue_input,visible_input,pb,kex])
+    pb, kex = KineticsFit()([visible_input, titrant_input])
+    ihat,cshat = ComplexFit(initials['intensity'], larmor)([residue_input,visible_input,pb,kex])
 
-    csobs = CSP_fit(initials['15N'],initials['1H'], larmor)([residue_input,N15_input,H1_input])
+    csobs = CspFit(initials['15N'],initials['1H'], larmor)([residue_input,N15_input,H1_input])
 
-    int_loss = int_negLogL(initials['intensity'])([Int_input,ihat])
-    cs_loss = cs_negLogL(larmor)([csobs,cshat])
+    int_loss = IntNegLogL(initials['intensity'])([Int_input,ihat])
+    cs_loss = CsNegLogL(larmor)([csobs,cshat])
 
     summed_loss = Add()([int_loss,cs_loss])
 
