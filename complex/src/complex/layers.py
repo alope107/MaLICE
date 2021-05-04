@@ -9,13 +9,13 @@ class KineticsFit(Layer):
     def build(self, input_shape):
         self.Kd_exp = self.add_weight(name='Kd_exp', shape=(1,),
                                       #initializer=Constant(K.log(Kd)/K.log(10.0)),
-                                      initializer=RandomUniform(minval=-1, maxval=4),
-                                      constraint=MinMaxNorm(min_value=-1, max_value=4, rate=0.1), 
+                                      initializer=RandomUniform(minval=0, maxval=3),
+                                      constraint=MinMaxNorm(min_value=-1, max_value=4, rate=1.0), 
                                       trainable=True)
         self.koff_exp = self.add_weight(name='koff_exp', shape=(1,),
                                         #initializer=Constant(K.log(koff)/K.log(10.0))
                                         initializer=RandomUniform(minval=0, maxval=5),
-                                        constraint=MinMaxNorm(min_value=0, max_value=5, rate=0.1), 
+                                        constraint=MinMaxNorm(min_value=0, max_value=5, rate=1.0), 
                                         trainable=True)
 
     def call(self, inputs):
@@ -44,16 +44,19 @@ class ComplexFit(Layer):
         self.larmor = larmor
 
     def build(self,input_shape):
-        self.ref_I = self.add_weight(name='ref_I', shape=(self.n_res,),
-                                     initializer=Constant(self.init_I*1.001),
-                                     #constraint=MinMaxNorm(min_value=self.init_I/10, max_value=self.init_I*10),
-                                     trainable=True )
         init_I_mean = tf.math.reduce_mean( self.init_I )
         init_I_std =  tf.math.reduce_std( self.init_I )
+        self.ref_I_offset = self.add_weight(name='ref_I', shape=(self.n_res,),
+                                            initializer=Constant(self.init_I*1.001),
+                                            constraint=MinMaxNorm(min_value=init_I_mean * -0.1, 
+                                                                  max_value=init_I_mean * 0.1,
+                                                                  rate=1.0),
+                                            trainable=True )
+        
         self.dR2 = self.add_weight(shape=(1,),
                                    #initializer=Constant(dR2),
-                                   initializer=RandomUniform(minval=0, maxval=200),
-                                   #constraint=MinMaxNorm(min_value=0, max_value=200), 
+                                   initializer=RandomUniform(minval=10, maxval=100),
+                                   constraint=MinMaxNorm(min_value=0.01, max_value=200, rate=1.0), 
                                    trainable=True )
         self.amp_scaler = self.add_weight(name='amp_scaler', shape=(1,),
                                           #initializer=Constant(amp_scaler),#
@@ -63,14 +66,14 @@ class ComplexFit(Layer):
         
         self.delta_w = self.add_weight(name='delta_w', shape=(self.n_res,),
                                        initializer=Constant(self.larmor/100),
-                                       constraint=MinMaxNorm(min_value=0, max_value=6.0*self.larmor, rate=0.1),
+                                       constraint=MinMaxNorm(min_value=0, max_value=6.0*self.larmor, rate=1.0),
                                        trainable=True)
     def call(self, inputs): #inputs):
         resn_array, visible, pb, kex = inputs
         pa = 1 - pb
         
         dw = K.sum( self.delta_w * resn_array, axis=1, keepdims=True )
-        I = K.sum( self.ref_I * resn_array, axis=1, keepdims=True )
+        I = K.sum( (self.init_I + self.ref_I_offset) * resn_array, axis=1, keepdims=True )
         amp = self.amp_scaler / tf.math.reduce_mean(visible)
         
         broad_denom = (kex**2 + (1-5*pa*pb)*(dw**2))**2 + 4*pa*pb*(1-4*pa*pb)*(dw**4)
@@ -102,19 +105,19 @@ class CspFit(Layer):
         self.larmor = larmor
     
     def build(self, input_shape):
-        self.ref_N = self.add_weight(shape=(self.n_res,),
-                                     initializer=Constant(self.init_N+0.005),
-                                     #constraint=MinMaxNorm(min_value=self.init_N-0.2, max_value=self.init_N+0.2), 
-                                     trainable=False)
-        self.ref_H = self.add_weight(shape=(self.n_res,),
-                                     initializer=Constant(self.init_H+0.001),
-                                     #constraint=MinMaxNorm(min_value=self.init_H-0.05, max_value=self.init_H+0.05),
-                                     trainable=False)
+        self.ref_N_offset = self.add_weight(shape=(self.n_res,),
+                                            initializer=Constant(0.005),
+                                            constraint=MinMaxNorm(min_value=-0.2, max_value=0.2, rate=1.0), 
+                                            trainable=True)
+        self.ref_H_offset = self.add_weight(shape=(self.n_res,),
+                                            initializer=Constant(0.001),
+                                            constraint=MinMaxNorm(min_value=-0.05, max_value=0.05, rate=1.0),
+                                            trainable=True)
                                      
     def call(self, inputs):
         resn_array, N_obs, H_obs = inputs
-        N_ref = K.sum( self.ref_N * resn_array, axis=1, keepdims=True)
-        H_ref = K.sum( self.ref_H * resn_array, axis=1, keepdims=True)
+        N_ref = K.sum( (self.init_N + self.ref_N_offset) * resn_array, axis=1, keepdims=True)
+        H_ref = K.sum( (self.init_H + self.ref_H_offset) * resn_array, axis=1, keepdims=True)
         csp = K.sqrt((0.2*(N_obs-N_ref))**2 + (H_obs-H_ref)**2)*self.larmor
         return csp
     
@@ -129,7 +132,7 @@ class IntNegLogL(Layer):
         self.I_noise = self.add_weight( shape=(1,),
                                         initializer=Constant(init_I_mean/20.0),#RandomUniform(minval=init_I_mean/50, maxval=init_I_mean/4),  
                                         constraint=MinMaxNorm(min_value=init_I_mean/10.0, max_value=init_I_mean*10.0), 
-                                        trainable=False )
+                                        trainable=True )
         
     def call(self, inputs):
         y_true, y_pred = inputs
@@ -145,7 +148,7 @@ class CsNegLogL(Layer):
         self.cs_noise = self.add_weight( shape=(1,), 
                                          initializer=Constant(self.larmor/250),#RandomUniform(minval=self.larmor/5000, maxval=self.larmor/500), 
                                          constraint=MinMaxNorm(min_value=self.larmor/4500, max_value=self.larmor/50), 
-                                         trainable=False )
+                                         trainable=True )
     
     def call(self, inputs):
         y_true, y_pred = inputs
