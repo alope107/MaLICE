@@ -2,7 +2,7 @@
 import sys, argparse
 import numpy as np, pandas as pd
 
-from complex.layers import *
+from layers import *
 
 from keras.layers import Input, Layer, Add
 from keras.models import Model
@@ -119,7 +119,7 @@ def run_malice(config):
     decay = ReduceLROnPlateau(monitor='loss', patience=50, factor=0.5)
     history = model.fit( [tensors[x] for x in ['residue','15N','1H','intensity','visible','titrant']],
                         np.zeros(len(tensors['15N'])),
-                        epochs=100, batch_size=24, verbose=1, shuffle=True,
+                        epochs=100, batch_size=12, verbose=1, shuffle=True,
                         callbacks=[decay] )
 
 
