@@ -6,16 +6,27 @@ import tensorflow_probability as tfp
 import tensorflow as tf
 
 class KineticsFit(Layer):
+    def __init__(self, bounds_dict):
+        super().__init__()
+        self.Kd_exp_lower, self.Kd_exp_upper = bounds_dict['Kd_exp']
+        self.koff_exp_lower, self.koff_exp_upper = bounds_dict['koff_exp']
+
     def build(self, input_shape):
         self.Kd_exp = self.add_weight(name='Kd_exp', shape=(1,),
                                       #initializer=Constant(K.log(Kd)/K.log(10.0)),
-                                      initializer=RandomUniform(minval=0, maxval=3),
-                                      constraint=MinMaxNorm(min_value=-1, max_value=4, rate=1.0), 
+                                      initializer=RandomUniform(minval=self.Kd_exp_lower, 
+                                                                maxval=self.Kd_exp_upper),
+                                      constraint=MinMaxNorm(min_value=self.Kd_exp_lower, 
+                                                            max_value=self.Kd_exp_upper, 
+                                                            rate=1.0), 
                                       trainable=True)
         self.koff_exp = self.add_weight(name='koff_exp', shape=(1,),
                                         #initializer=Constant(K.log(koff)/K.log(10.0))
-                                        initializer=RandomUniform(minval=0, maxval=5),
-                                        constraint=MinMaxNorm(min_value=0, max_value=5, rate=1.0), 
+                                        initializer=RandomUniform(minval=self.koff_exp_lower, 
+                                                                  maxval=self.koff_exp_upper),
+                                        constraint=MinMaxNorm(min_value=self.koff_exp_lower, 
+                                                              max_value=self.koff_exp_upper, 
+                                                              rate=1.0), 
                                         trainable=True)
 
     def call(self, inputs):
@@ -37,43 +48,53 @@ class KineticsFit(Layer):
 
 
 class ComplexFit(Layer):
-    def __init__(self, init_I, larmor):
+    def __init__(self, init_I, larmor, bounds_dict):
         super().__init__()
         self.init_I = init_I
         self.n_res = len( self.init_I )
         self.larmor = larmor
+        self.I_offset_lower, self.I_offset_upper = bounds_dict['I_offset']
+        self.dR2_lower, self.dR2_upper = bounds_dict['dR2']
+        self.amp_scaler_lower, self.amp_scaler_upper = bounds_dict['amp_scaler']
+        self.delta_w_lower, self.delta_w_upper = bounds_dict['delta_w']
 
     def build(self,input_shape):
         init_I_mean = tf.math.reduce_mean( self.init_I )
         init_I_std =  tf.math.reduce_std( self.init_I )
-        self.ref_I_offset = self.add_weight(name='ref_I', shape=(self.n_res,),
-                                            initializer=Constant(self.init_I*1.001),
-                                            constraint=MinMaxNorm(min_value=init_I_mean * -0.1, 
-                                                                  max_value=init_I_mean * 0.1,
-                                                                  rate=1.0),
-                                            trainable=True )
+        self.I_offset = self.add_weight(name='ref_I', shape=(self.n_res,),
+                                        initializer=Constant(0.001),
+                                        constraint=MinMaxNorm(min_value=self.I_offset_lower, 
+                                                              max_value=self.I_offset_upper,
+                                                              rate=1.0),
+                                        trainable=True )
         
         self.dR2 = self.add_weight(shape=(1,),
                                    #initializer=Constant(dR2),
-                                   initializer=RandomUniform(minval=10, maxval=100),
-                                   constraint=MinMaxNorm(min_value=0.01, max_value=200, rate=1.0), 
+                                   initializer=RandomUniform(minval=self.dR2_lower, 
+                                                             maxval=self.dR2_upper),
+                                   constraint=MinMaxNorm(min_value=self.dR2_lower, 
+                                                         max_value=self.dR2_upper, 
+                                                         rate=1.0), 
                                    trainable=True )
         self.amp_scaler = self.add_weight(name='amp_scaler', shape=(1,),
                                           #initializer=Constant(amp_scaler),#
                                           initializer=RandomNormal(mean=float(5*init_I_mean), stddev=float(5*init_I_std)), 
-                                          constraint=MinMaxNorm(min_value=init_I_mean/10.0, max_value=init_I_mean*10.0), 
+                                          constraint=MinMaxNorm(min_value=self.amp_scaler_lower, 
+                                                                max_value=self.amp_scaler_upper), 
                                           trainable=True )
         
         self.delta_w = self.add_weight(name='delta_w', shape=(self.n_res,),
                                        initializer=Constant(self.larmor/100),
-                                       constraint=MinMaxNorm(min_value=0, max_value=6.0*self.larmor, rate=1.0),
+                                       constraint=MinMaxNorm(min_value=self.delta_w_lower, 
+                                                             max_value=self.delta_w_upper, 
+                                                             rate=1.0),
                                        trainable=True)
     def call(self, inputs): #inputs):
         resn_array, visible, pb, kex = inputs
         pa = 1 - pb
         
         dw = K.sum( self.delta_w * resn_array, axis=1, keepdims=True )
-        I = K.sum( (self.init_I + self.ref_I_offset) * resn_array, axis=1, keepdims=True )
+        I = K.sum( (self.init_I + self.I_offset) * resn_array, axis=1, keepdims=True )
         amp = self.amp_scaler / tf.math.reduce_mean(visible)
         
         broad_denom = (kex**2 + (1-5*pa*pb)*(dw**2))**2 + 4*pa*pb*(1-4*pa*pb)*(dw**4)
@@ -97,41 +118,50 @@ class ComplexFit(Layer):
 
 
 class CspFit(Layer):
-    def __init__(self, init_N, init_H, larmor):
+    def __init__(self, init_N, init_H, larmor, bounds_dict):
         super().__init__()
         self.n_res = len( init_N )
         self.init_N = init_N
         self.init_H = init_H
         self.larmor = larmor
+        self.N_offset_lower, self.N_offset_upper = bounds_dict['N_offset']
+        self.H_offset_lower, self.H_offset_upper = bounds_dict['H_offset']
     
     def build(self, input_shape):
-        self.ref_N_offset = self.add_weight(shape=(self.n_res,),
-                                            initializer=Constant(0.005),
-                                            constraint=MinMaxNorm(min_value=-0.2, max_value=0.2, rate=1.0), 
-                                            trainable=True)
-        self.ref_H_offset = self.add_weight(shape=(self.n_res,),
-                                            initializer=Constant(0.001),
-                                            constraint=MinMaxNorm(min_value=-0.05, max_value=0.05, rate=1.0),
-                                            trainable=True)
+        self.N_offset = self.add_weight(shape=(self.n_res,),
+                                        initializer=Constant(0.005),
+                                        constraint=MinMaxNorm(min_value=self.N_offset_lower, 
+                                                              max_value=self.N_offset_upper, 
+                                                              rate=1.0), 
+                                        trainable=True)
+        self.H_offset = self.add_weight(shape=(self.n_res,),
+                                        initializer=Constant(0.001),
+                                        constraint=MinMaxNorm(min_value=self.H_offset_lower, 
+                                                              max_value=self.H_offset_upper, 
+                                                              rate=1.0),
+                                        trainable=True)
                                      
     def call(self, inputs):
         resn_array, N_obs, H_obs = inputs
-        N_ref = K.sum( (self.init_N + self.ref_N_offset) * resn_array, axis=1, keepdims=True)
-        H_ref = K.sum( (self.init_H + self.ref_H_offset) * resn_array, axis=1, keepdims=True)
+        N_ref = K.sum( (self.init_N + self.N_offset) * resn_array, axis=1, keepdims=True)
+        H_ref = K.sum( (self.init_H + self.H_offset) * resn_array, axis=1, keepdims=True)
         csp = K.sqrt((0.2*(N_obs-N_ref))**2 + (H_obs-H_ref)**2)*self.larmor
         return csp
     
     
 class IntNegLogL(Layer):
-    def __init__(self, init_I):
+    def __init__(self, init_I, bounds_dict):
         super().__init__()
         self.init_I = init_I
+        self.I_noise_lower, self.I_noise_upper = bounds_dict['I_noise']
     
     def build(self,input_shape):
         init_I_mean = float(tf.math.reduce_mean( self.init_I ))
         self.I_noise = self.add_weight( shape=(1,),
                                         initializer=Constant(init_I_mean/20.0),#RandomUniform(minval=init_I_mean/50, maxval=init_I_mean/4),  
-                                        constraint=MinMaxNorm(min_value=init_I_mean/10.0, max_value=init_I_mean*10.0), 
+                                        constraint=MinMaxNorm(min_value=self.I_noise_lower, 
+                                                              max_value=self.I_noise_upper,
+                                                              rate = 1.0), 
                                         trainable=True )
         
     def call(self, inputs):
@@ -140,14 +170,17 @@ class IntNegLogL(Layer):
         return -1*dist.log_prob(y_true)
 
 class CsNegLogL(Layer):
-    def __init__(self, larmor):
+    def __init__(self, larmor, bounds_dict):
         super().__init__()
         self.larmor = larmor
+        self.cs_noise_lower, self.cs_noise_upper = bounds_dict['cs_noise']
     
     def build(self, input_shape):
         self.cs_noise = self.add_weight( shape=(1,), 
                                          initializer=Constant(self.larmor/250),#RandomUniform(minval=self.larmor/5000, maxval=self.larmor/500), 
-                                         constraint=MinMaxNorm(min_value=self.larmor/4500, max_value=self.larmor/50), 
+                                         constraint=MinMaxNorm(min_value=self.cs_noise_lower, 
+                                                               max_value=self.cs_noise_upper,
+                                                               rate=1.0), 
                                          trainable=True )
     
     def call(self, inputs):

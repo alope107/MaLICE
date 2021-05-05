@@ -8,7 +8,7 @@ from keras.layers import Input, Layer, Add
 from keras.models import Model
 from keras.initializers import RandomUniform, RandomNormal, Constant
 from keras.constraints import MinMaxNorm
-from keras.callbacks import ReduceLROnPlateau
+from keras.callbacks import Callback, TerminateOnNaN, EarlyStopping, ReduceLROnPlateau
 from keras.optimizers import Adam
 
 from malice.seeds import set_base_seed
@@ -70,6 +70,69 @@ def parse_input(fname):
     return data, reference_points, residues
 
 
+## DBW 210504
+## USED FOR GENERATING BATCHES BASED ON RESIDUES RATHER THAN INDIVIDUAL OBSERVATIONS
+## PROBABLY DELETE LATER
+class DataGenerator(tf.keras.utils.Sequence):
+    def __init__(self, input, batch_size=3, num_classes=None, shuffle=True):
+        self.batch_size = batch_size
+        self.input = input
+        self.indices = list(range(len(input)))
+        self.num_classes = num_classes
+        self.shuffle = shuffle
+        self.on_epoch_end()
+    
+    def __len__(self):
+        return len(self.indices) // self.batch_size
+    
+    def __getitem__(self, index):
+        index = self.index[index*self.batch_size:(index+1)*self.batch_size]
+        ## Ok, so index in this case is the residue numbers randomized
+        ## Concatenate the variable columns togther for the number of indices selected
+
+        n_columns = len( self.input[ index[0] ] )
+        x = [ np.concatenate([self.input[idx][i] for idx in index]) for i in range(n_columns) ]
+        y = np.zeros( len(x[0]) )
+        return x, y
+
+
+    def on_epoch_end(self):
+        self.index = np.arange(len(self.indices))
+        if self.shuffle == True:
+            np.random.shuffle(self.index)
+
+#def validate_bounds( parameters, bounds_dict ):
+class VerifyBounds(Callback):
+    def __init__(self, bounds_dict):
+        super(VerifyBounds, self).__init__()
+
+        ## DO SOMETHING WITH BOUNDS_DICT
+        self.bounds_dict = bounds_dict
+    
+    def on_epoch_end(self, epoch, logs=None):
+        weights = self.model.get_weights()
+        # Weights is a 10 member list of arrays in the following order
+        # [ 'Kd_exp', 'koff_exp', 'ref_I_offset', 'dR2', 'amp_scaler', 'delta_w', 'ref_N_offset', 'ref_H_offset', 'I_noise', 'cs_noise' ]
+        # Bounds dict has been ordered to match
+        for idx, var in enumerate(self.bounds_dict):
+            if np.any(weights[idx] < self.bounds_dict[var][0]) or np.any(weights[idx] > self.bounds_dict[var][1]):
+                print(var+' is out of bounds')
+                self.model.stop_training = True
+
+
+        print(len(weights))
+        ## Should be able to get weights using self.model
+        ## If there is a violation of the bounds, can set flag self.model.stop_training = True
+
+
+
+
+
+
+
+
+
+
 def run_malice(config):
 
     # Important variables
@@ -80,19 +143,61 @@ def run_malice(config):
 
     user_data, initial_reference, residues = parse_input(config.input_file)
 
+    init_intensity_mean = np.mean( initial_reference.intensity )
+
+    ## Define lower/upper bounds for parameters
+    ## Consider making togglable
+    bounds = { 'Kd_exp' : (-1, 4),
+               'koff_exp' : (0, 5),
+               'I_offset' : (-0.1*init_intensity_mean, 0.1*init_intensity_mean),
+               'dR2' :    (0.01, 200),
+               'amp_scaler' : (init_intensity_mean, init_intensity_mean*100),
+               'delta_w' : (0.0, larmor*6.0),
+               'N_offset' : (-0.2, 0.2),
+               'H_offset' : (-0.05, 0.05),
+               'I_noise': (init_intensity_mean/100, init_intensity_mean/5),
+               'cs_noise': (larmor/4500, larmor/50) }
+
+
+
     ## Parse data into tensors
-    tensors = {}
-    tensors['residue'] = np.asarray( [ [1 if residues[i] == r else 0 for i in range(len(residues))] 
-                                        for r in user_data.residue ], 'float32' )
+    ## DBW 210504 -- group all rows together by residue so that they can be called together
+    ## DISABLING FOR NOW
+    '''
+    tensors_by_residue = []
+    for r in residues:
+        residue_tensors = []
+        residue_data = user_data[user_data.residue == r]
+        residue_tensors.append( np.asarray( [[1 if residues[i] == r else 0 
+                                            for i in range(len(residues))]]*len(residue_data), 
+                                            'float32' ) )
+        for dtype in ['15N','1H','intensity','visible','titrant']:
+            residue_tensors.append( np.reshape( np.asarray( list(residue_data[dtype]), 'float32' ), 
+                                    (len(residue_data),1) ) )
+        tensors_by_residue.append( residue_tensors )
+    '''
+
+    ## Simplified tensor input
+    x_input = []
+    x_input.append( np.asarray( [ [1 if residues[i] == r else 0 for i in range(len(residues))] 
+                                  for r in user_data.residue ], 'float32' )  )
     for dtype in ['15N','1H','intensity','visible','titrant']:
-        tensors[dtype] = np.reshape( np.asarray( list(user_data[dtype]), 'float32' ), (len(user_data),1) )
+        x_input.append( np.reshape( np.asarray( list(user_data[dtype]), 'float32' ), (len(user_data),1) ) )                       
+    y_output = np.zeros( len(x_input[1]) )
+    #tensors = {}
+    #tensors['residue'] = np.asarray( [ [1 if residues[i] == r else 0 for i in range(len(residues))] 
+    #                                    for r in user_data.residue ], 'float32' )
+    #for dtype in ['15N','1H','intensity','visible','titrant']:
+    #    tensors[dtype] = np.reshape( np.asarray( list(user_data[dtype]), 'float32' ), (len(user_data),1) )
+
+  
 
     initials = {}
     for dtype in ['15N','1H','intensity']:
         initials[dtype] = np.asarray( list(initial_reference[dtype]), 'float32' )
 
     #fname_prefix = config.input_file.split('/')[-1].split('.')[0]
-
+    
 
     ## Model
     visible_input = Input(shape=(1,), name='visible')
@@ -102,25 +207,27 @@ def run_malice(config):
     Int_input = Input(shape=(1,), name='intensity')
     residue_input = Input(shape=(104,), name='residue_array')
 
-    pb, kex = KineticsFit()([visible_input, titrant_input])
-    ihat,cshat = ComplexFit(initials['intensity'], larmor)([residue_input,visible_input,pb,kex])
+    pb, kex = KineticsFit(bounds)([visible_input, titrant_input])
+    ihat,cshat = ComplexFit(initials['intensity'], larmor, bounds)([residue_input,visible_input,pb,kex])
+    csobs = CspFit(initials['15N'],initials['1H'], larmor, bounds)([residue_input,N15_input,H1_input])
 
-    csobs = CspFit(initials['15N'],initials['1H'], larmor)([residue_input,N15_input,H1_input])
-
-    int_loss = IntNegLogL(initials['intensity'])([Int_input,ihat])
-    cs_loss = CsNegLogL(larmor)([csobs,cshat])
-
+    int_loss = IntNegLogL(initials['intensity'],bounds)([Int_input,ihat])
+    cs_loss = CsNegLogL(larmor,bounds)([csobs,cshat])
     summed_loss = Add()([int_loss,cs_loss])
 
     model = Model( inputs=[residue_input, N15_input, H1_input, Int_input, visible_input, titrant_input],
                 outputs=summed_loss)
     model.compile(optimizer=Adam(learning_rate=4e-2), loss=sum_loss)
 
-    decay = ReduceLROnPlateau(monitor='loss', patience=50, factor=0.5)
-    history = model.fit( [tensors[x] for x in ['residue','15N','1H','intensity','visible','titrant']],
-                        np.zeros(len(tensors['15N'])),
-                        epochs=100, batch_size=12, verbose=1, shuffle=True,
-                        callbacks=[decay] )
+    decay = ReduceLROnPlateau(monitor='loss', patience=10, factor=0.5)
+    verify_bounds = VerifyBounds(bounds)
+    terminate_nan = TerminateOnNaN()
+    history = model.fit( x_input, y_output,
+                         #DataGenerator(tensors_by_residue),
+                         #[tensors[x] for x in ['residue','15N','1H','intensity','vigit stsible','titrant']],
+                         #np.zeros(len(tensors['15N'])),
+                         epochs=100, batch_size=12, verbose=1, shuffle=True,
+                         callbacks=[decay, verify_bounds, terminate_nan] )
 
 
     ## Report some quick diagnostics
