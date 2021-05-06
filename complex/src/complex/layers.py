@@ -1,6 +1,7 @@
 from keras.layers import Layer
 from keras.initializers import RandomUniform, RandomNormal, Constant
 from keras.constraints import MinMaxNorm
+from keras.regularizers import L2
 import keras.backend as K
 import tensorflow_probability as tfp
 import tensorflow as tf
@@ -88,6 +89,7 @@ class ComplexFit(Layer):
                                        constraint=MinMaxNorm(min_value=self.delta_w_lower, 
                                                              max_value=self.delta_w_upper, 
                                                              rate=1.0),
+                                       regularizer=L2(1e-2),                 
                                        trainable=True)
     def call(self, inputs): #inputs):
         resn_array, visible, pb, kex = inputs

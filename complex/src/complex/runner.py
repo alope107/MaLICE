@@ -1,6 +1,13 @@
 ## CompLEx Tensorflow implementation
-import sys, argparse
+import os, sys, argparse, time, datetime
 import numpy as np, pandas as pd
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
+import tensorflow as tf
+tf.get_logger().setLevel('INFO')
+physical_devices = tf.config.experimental.list_physical_devices('GPU')
+assert len(physical_devices) > 0, "Not enough GPU hardware devices available"
+config = tf.config.experimental.set_memory_growth(physical_devices[0], True)
 
 from layers import *
 
@@ -116,14 +123,45 @@ class VerifyBounds(Callback):
         # Bounds dict has been ordered to match
         for idx, var in enumerate(self.bounds_dict):
             if np.any(weights[idx] < self.bounds_dict[var][0]) or np.any(weights[idx] > self.bounds_dict[var][1]):
-                print(var+' is out of bounds')
-                self.model.stop_training = True
+                #print(var+' is out of bounds')
+                #self.model.stop_training = True
 
+                # Don't abort training, instead fix the bound
+                for k, v in enumerate(weights[idx]):
+                    if v < self.bounds_dict[var][0]: weights[idx][k] = self.bounds_dict[var][0]
+                    if v > self.bounds_dict[var][1]: weights[idx][k] = self.bounds_dict[var][1]
+        self.model.set_weights( weights )
 
-        print(len(weights))
         ## Should be able to get weights using self.model
         ## If there is a violation of the bounds, can set flag self.model.stop_training = True
 
+
+def generate_weights(weights_dict, n_res):
+    ## Generate new starting weights 
+    new_weights = []
+    for v in weights_dict:
+        if v in ['I_offset','N_offset','H_offset','delta_w']: n = n_res
+        else: n = 1
+        new_weights.append( np.random.uniform( low=weights_dict[v][0], 
+                                               high=weights_dict[v][1],
+                                               size=n) )
+    return new_weights
+    
+
+
+
+
+def reset_weights(model):
+    for idx, layer in enumerate(model.layers):
+        if hasattr(model.layers[idx], 'kernel_initializer') and\
+           hasattr(model.layers[idx], 'bias_initializer'):
+           weight_initializer = model.layers[idx].kernel_initializer
+           bias_initializer = model.layers[idx].bias_initializer
+
+           old_weights, old_biases = model.layers[idx].get_weights()
+
+           model.layers[idx].set_weights([weight_initializer(shape=old_weights.shape),
+                                          bias_initializer(shape=len(old_biases))])
 
 
 
@@ -134,6 +172,8 @@ class VerifyBounds(Callback):
 
 
 def run_malice(config):
+    performance = {}
+    performance['start_time'] = time.time()
 
     # Important variables
     larmor = config.larmor
@@ -142,7 +182,7 @@ def run_malice(config):
     nh_scale = 0.2  # Consider reducing to ~0.14
 
     user_data, initial_reference, residues = parse_input(config.input_file)
-
+    n_res = len(residues)
     init_intensity_mean = np.mean( initial_reference.intensity )
 
     ## Define lower/upper bounds for parameters
@@ -157,6 +197,17 @@ def run_malice(config):
                'H_offset' : (-0.05, 0.05),
                'I_noise': (init_intensity_mean/100, init_intensity_mean/5),
                'cs_noise': (larmor/4500, larmor/50) }
+    
+    initial_weights = { 'Kd_exp' : (-1, 4),
+                        'koff_exp' : (0, 5),
+                        'I_offset' : (-0.01*init_intensity_mean, 0.01*init_intensity_mean),
+                        'dR2' :    (10.0, 50.0),
+                        'amp_scaler' : (init_intensity_mean*5, init_intensity_mean*20),
+                        'delta_w' : (0.0, larmor*0.1),
+                        'N_offset' : (-0.05, 0.05),
+                        'H_offset' : (-0.01, 0.01),
+                        'I_noise': (init_intensity_mean/20, init_intensity_mean/5),
+                        'cs_noise': (1, 5) }
 
 
 
@@ -196,9 +247,10 @@ def run_malice(config):
     for dtype in ['15N','1H','intensity']:
         initials[dtype] = np.asarray( list(initial_reference[dtype]), 'float32' )
 
+    print('Data loaded')
     #fname_prefix = config.input_file.split('/')[-1].split('.')[0]
     
-
+    
     ## Model
     visible_input = Input(shape=(1,), name='visible')
     titrant_input = Input(shape=(1,), name='titrant')
@@ -217,17 +269,67 @@ def run_malice(config):
 
     model = Model( inputs=[residue_input, N15_input, H1_input, Int_input, visible_input, titrant_input],
                 outputs=summed_loss)
-    model.compile(optimizer=Adam(learning_rate=4e-2), loss=sum_loss)
-
-    decay = ReduceLROnPlateau(monitor='loss', patience=10, factor=0.5)
+    
     verify_bounds = VerifyBounds(bounds)
     terminate_nan = TerminateOnNaN()
-    history = model.fit( x_input, y_output,
-                         #DataGenerator(tensors_by_residue),
-                         #[tensors[x] for x in ['residue','15N','1H','intensity','vigit stsible','titrant']],
-                         #np.zeros(len(tensors['15N'])),
-                         epochs=100, batch_size=12, verbose=1, shuffle=True,
-                         callbacks=[decay, verify_bounds, terminate_nan] )
+
+    #model = Model( inputs=[residue_input, N15_input, H1_input, Int_input, visible_input, titrant_input],
+    #            outputs=summed_loss)
+    
+    best_score = 1e10
+    for i in range(20): # Total number of trials
+        model.compile(optimizer=Adam(learning_rate=4e-2), loss=sum_loss)
+        decay = ReduceLROnPlateau(monitor='loss', patience=50, factor=0.5)
+        
+
+        best_trial_parameters = generate_weights(initial_weights,n_res)
+        for s in [12,]: # 48, 128, 4096]:
+            model.set_weights( best_trial_parameters )
+            best_trial_score = 1e10
+            for _ in range(1):
+                history = model.fit( x_input, y_output,
+                                    epochs=100, batch_size=s, verbose=0, shuffle=True,
+                                    callbacks=[decay, verify_bounds, terminate_nan] )
+                current_score = history.history['loss'][-1]
+            
+                if np.isnan( current_score ): break 
+                elif current_score < best_trial_score:
+                    best_trial_score = current_score
+                    best_trial_parameters = model.get_weights()
+                else:
+                    model.set_weights( best_trial_parameters )
+
+               
+            #current_weights = model.get_weights()
+
+        
+
+
+        if np.isnan( current_score ):
+            print('Iteration '+str(i+1)+':\tNaN\'d out... :(') 
+            current_score = 1e10
+        else:
+            print('Iteration '+str(i+1)+':\t Score = '+format(best_trial_score,'.1f'))
+            if best_trial_score < best_score:
+                print('\tBest score improved from '+format(best_score,'.1f')+' to '+format(best_trial_score,'.1f'))
+                best_score = best_trial_score
+                best_weights = model.get_weights()
+            else:
+                print('\tBest score did not improve ')
+    model.set_weights(best_weights)
+
+
+    ## Do a final polishing
+    for s in  [12, 48, 128, 4096]:
+        model.compile(optimizer=Adam(learning_rate=4e-2), loss=sum_loss)
+        decay = ReduceLROnPlateau(monitor='loss', patience=50, factor=0.5)
+
+        history = model.fit( x_input, y_output,
+                                    epochs=2000, batch_size=s, verbose=0, shuffle=True,
+                                    callbacks=[decay, verify_bounds, terminate_nan] )
+        current_score = history.history['loss'][-1]
+        print('Polishing with batch size = '+str(s)+';\tScore = '+format(current_score,'.1f'))
+
 
 
     ## Report some quick diagnostics
@@ -239,6 +341,10 @@ def run_malice(config):
     print('dR2 = '+format(dR2,'.2f'))
 
     print(f'{[Kd_exp, koff_exp, dR2, amp_scaler, list(deltaw_array)]}')
+
+    performance['final_time'] = time.time() - performance['start_time']
+    print('\n\tRun time = '+str(datetime.timedelta(seconds=performance['final_time'])).split('.')[0])
+
 
     return Kd_exp, koff_exp, dR2, amp_scaler, list(deltaw_array)
 
